@@ -511,6 +511,83 @@ class Neo4jStore(GraphStore):
             logger.error(f"Failed to add relation to Neo4j: {e}")
             return False
     
+    def add_entities_batch(self, entities: List[Entity]) -> int:
+        """批量添加实体（优化性能）"""
+        if not entities:
+            return 0
+        try:
+            with self._driver.session(database=self.database) as session:
+                # 准备批量数据
+                data = [{
+                    "entity_id": e.entity_id,
+                    "name": e.name,
+                    "entity_type": e.entity_type.value,
+                    "aliases": e.aliases,
+                    "description": e.description,
+                    "mentions": e.mentions,
+                    "properties": json.dumps(e.properties)
+                } for e in entities]
+                
+                # 批量创建
+                query = """
+                UNWIND $batch AS item
+                MERGE (e:Entity {entity_id: item.entity_id})
+                SET e.name = item.name,
+                    e.entity_type = item.entity_type,
+                    e.aliases = item.aliases,
+                    e.description = item.description,
+                    e.mentions = item.mentions,
+                    e.properties = item.properties
+                """
+                session.run(query, batch=data)
+            logger.info(f"Batch added {len(entities)} entities to Neo4j")
+            return len(entities)
+        except Exception as e:
+            logger.error(f"Failed to batch add entities: {e}")
+            return 0
+    
+    def add_relations_batch(self, relations: List[Relation]) -> int:
+        """批量添加关系（优化性能）"""
+        if not relations:
+            return 0
+        try:
+            # 按关系类型分组
+            from collections import defaultdict
+            by_type = defaultdict(list)
+            for r in relations:
+                by_type[r.relation_type.value.upper()].append(r)
+            
+            total = 0
+            with self._driver.session(database=self.database) as session:
+                for rel_type, rels in by_type.items():
+                    data = [{
+                        "source_id": r.source_id,
+                        "target_id": r.target_id,
+                        "relation_id": r.relation_id,
+                        "confidence": r.confidence,
+                        "description": r.description,
+                        "source_chunk": r.source_chunk
+                    } for r in rels]
+                    
+                    query = f"""
+                    UNWIND $batch AS item
+                    MATCH (source:Entity {{entity_id: item.source_id}})
+                    MATCH (target:Entity {{entity_id: item.target_id}})
+                    MERGE (source)-[r:{rel_type}]->(target)
+                    SET r.relation_id = item.relation_id,
+                        r.confidence = item.confidence,
+                        r.description = item.description,
+                        r.source_chunk = item.source_chunk
+                    """
+                    session.run(query, batch=data)
+                    total += len(rels)
+            
+            logger.info(f"Batch added {total} relations to Neo4j")
+            return total
+        except Exception as e:
+            logger.error(f"Failed to batch add relations: {e}")
+            return 0
+    
     def get_entity(self, entity_id: str) -> Optional[Entity]:
         """获取实体"""
         try:
@@ -656,14 +733,14 @@ class Neo4jStore(GraphStore):
                 
                 cypher = f"""
                 MATCH (e:Entity)
-                WHERE toLower(e.name) CONTAINS toLower($query)
-                   OR ANY(alias IN e.aliases WHERE toLower(alias) CONTAINS toLower($query))
+                WHERE toLower(e.name) CONTAINS toLower($search_query)
+                   OR ANY(alias IN e.aliases WHERE toLower(alias) CONTAINS toLower($search_query))
                    {type_filter}
                 RETURN e
-                LIMIT $limit
+                LIMIT $result_limit
                 """
                 
-                result = session.run(cypher, query=query, limit=limit)
+                result = session.run(cypher, search_query=query, result_limit=limit)
                 return [self._record_to_entity(record["e"]) for record in result]
         except Exception as e:
             logger.error(f"Failed to search entities: {e}")

@@ -13,9 +13,12 @@
 """
 import json
 import hashlib
+import os
+import pickle
 from enum import Enum
 from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass, field
+from pathlib import Path
 from loguru import logger
 
 
@@ -145,17 +148,59 @@ class EntityExtractor:
         llm_client=None,
         model: str = "gpt-4.1-mini",
         batch_size: int = 5,
-        min_mentions: int = 1  # 最少提及次数才保留
+        min_mentions: int = 1,  # 最少提及次数才保留
+        cache_dir: Optional[str] = None,  # 缓存目录
+        enable_cache: bool = True  # 是否启用缓存
     ):
         self.llm_client = llm_client
         self.model = model
         self.batch_size = batch_size
         self.min_mentions = min_mentions
+        self.enable_cache = enable_cache
+        
+        # 设置缓存目录
+        self.cache_dir = Path(cache_dir) if cache_dir else Path("/tmp/entity_cache")
+        if self.enable_cache:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         self._init_llm_client()
         
         # 实体缓存，用于去重和合并
         self._entity_cache: Dict[str, Entity] = {}
+        
+        # 内容哈希缓存 - 避免重复抽取
+        self._content_hash_cache: Dict[str, List[Entity]] = {}
+        self._load_cache()
+    
+    def _get_content_hash(self, content: str) -> str:
+        """计算内容哈希"""
+        return hashlib.md5(content.encode()).hexdigest()
+    
+    def _load_cache(self):
+        """从磁盘加载缓存"""
+        if not self.enable_cache:
+            return
+        cache_file = self.cache_dir / "entity_cache.pkl"
+        if cache_file.exists():
+            try:
+                with open(cache_file, "rb") as f:
+                    self._content_hash_cache = pickle.load(f)
+                logger.info(f"Loaded {len(self._content_hash_cache)} cached extractions")
+            except Exception as e:
+                logger.warning(f"Failed to load cache: {e}")
+                self._content_hash_cache = {}
+    
+    def _save_cache(self):
+        """保存缓存到磁盘"""
+        if not self.enable_cache:
+            return
+        cache_file = self.cache_dir / "entity_cache.pkl"
+        try:
+            with open(cache_file, "wb") as f:
+                pickle.dump(self._content_hash_cache, f)
+            logger.debug(f"Saved {len(self._content_hash_cache)} extractions to cache")
+        except Exception as e:
+            logger.warning(f"Failed to save cache: {e}")
     
     def _init_llm_client(self):
         """初始化 LLM 客户端"""
@@ -267,35 +312,83 @@ class EntityExtractor:
     
     def extract_from_chunks(
         self, 
-        chunks: List[Dict[str, Any]]
+        chunks: List[Dict[str, Any]],
+        min_content_length: int = 50,
+        max_concurrent: int = 5,
+        batch_size: int = None
     ) -> List[Entity]:
         """
-        从多个 chunks 批量抽取实体
+        从多个 chunks 批量抽取实体（优化版）
+        
+        优化策略:
+        1. 过滤过短的 chunks
+        2. 批量合并内容减少 LLM 调用
+        3. 并行处理
         
         Args:
             chunks: chunk 列表，每个需包含 chunk_id 和 content
+            min_content_length: 最小内容长度，短于此的跳过
+            max_concurrent: 最大并发数
+            batch_size: 每批合并的 chunk 数量，None 使用默认值
             
         Returns:
             合并去重后的实体列表
         """
+        import concurrent.futures
+        
+        # 使用传入的 batch_size 或默认值
+        actual_batch_size = batch_size if batch_size else self.batch_size
+        
+        # 1. 过滤过短的 chunks
+        valid_chunks = [
+            c for c in chunks 
+            if len(c.get("content", "")) >= min_content_length
+        ]
+        
+        if not valid_chunks:
+            return []
+        
+        logger.info(f"Processing {len(valid_chunks)}/{len(chunks)} valid chunks")
+        
+        # 2. 批量合并 - 每 batch_size 个 chunks 合并成一个请求
+        batches = []
+        for i in range(0, len(valid_chunks), actual_batch_size):
+            batch = valid_chunks[i:i + actual_batch_size]
+            # 合并内容
+            combined_content = "\n\n---\n\n".join([
+                f"[Chunk {c.get('chunk_id', i)}]\n{c.get('content', '')}"
+                for c in batch
+            ])
+            chunk_ids = [c.get("chunk_id", "") for c in batch]
+            batches.append((combined_content, chunk_ids))
+        
+        logger.info(f"Created {len(batches)} batches for LLM extraction")
+        
+        # 3. 并行处理批次
         all_entities = []
         
-        for i in range(0, len(chunks), self.batch_size):
-            batch = chunks[i:i + self.batch_size]
-            
-            for chunk in batch:
-                chunk_id = chunk.get("chunk_id", "")
-                content = chunk.get("content", "")
-                
-                entities = self.extract_from_text(content, chunk_id)
-                all_entities.extend(entities)
-            
-            logger.info(f"Processed {min(i + self.batch_size, len(chunks))}/{len(chunks)} chunks")
+        def process_batch(batch_data):
+            content, chunk_ids = batch_data
+            try:
+                entities = self._extract_batch(content, chunk_ids)
+                return entities
+            except Exception as e:
+                logger.error(f"Batch extraction failed: {e}")
+                return []
         
-        # 合并和去重
+        # 使用线程池并行处理
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+            futures = [executor.submit(process_batch, batch) for batch in batches]
+            
+            for i, future in enumerate(concurrent.futures.as_completed(futures)):
+                entities = future.result()
+                all_entities.extend(entities)
+                logger.info(f"Completed batch {i+1}/{len(batches)}, got {len(entities)} entities")
+        
+        # 4. 合并和去重
         merged_entities = self._merge_entities(all_entities)
         
-        # 过滤低频实体
+        # 5. 过滤低频实体
         filtered_entities = [
             e for e in merged_entities 
             if e.mentions >= self.min_mentions
@@ -303,6 +396,60 @@ class EntityExtractor:
         
         logger.info(f"Total entities: {len(filtered_entities)} (after merge and filter)")
         return filtered_entities
+    
+    def _extract_batch(
+        self, 
+        combined_content: str, 
+        chunk_ids: List[str]
+    ) -> List[Entity]:
+        """批量抽取实体（带缓存）"""
+        if not combined_content.strip():
+            return []
+        
+        # 检查缓存
+        content_hash = self._get_content_hash(combined_content)
+        if self.enable_cache and content_hash in self._content_hash_cache:
+            cached_entities = self._content_hash_cache[content_hash]
+            logger.debug(f"Cache hit for batch, returning {len(cached_entities)} entities")
+            # 更新 source_chunks
+            for entity in cached_entities:
+                entity.source_chunks = chunk_ids
+            return cached_entities
+        
+        try:
+            response = self.llm_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "你是技术文档实体抽取专家，擅长识别技术文档中的关键实体。请从多个文档片段中抽取实体。"
+                    },
+                    {
+                        "role": "user",
+                        "content": ENTITY_EXTRACTION_PROMPT.format(content=combined_content[:8000])
+                    }
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"}
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            entities = self._parse_entities(result, chunk_ids[0] if chunk_ids else None)
+            
+            # 将所有 chunk_ids 添加到实体的 source_chunks
+            for entity in entities:
+                entity.source_chunks = chunk_ids
+            
+            # 保存到缓存
+            if self.enable_cache:
+                self._content_hash_cache[content_hash] = entities
+                self._save_cache()
+            
+            return entities
+            
+        except Exception as e:
+            logger.error(f"Batch entity extraction failed: {e}")
+            return []
     
     def _merge_entities(self, entities: List[Entity]) -> List[Entity]:
         """合并重复实体"""

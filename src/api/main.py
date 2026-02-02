@@ -10,6 +10,8 @@ from typing import Optional, List, Dict, Any
 from pathlib import Path
 import shutil
 import uuid
+import asyncio
+from datetime import datetime
 from loguru import logger
 
 import sys
@@ -148,8 +150,15 @@ _components = {
     "reranker": None,
     "rag_chat": None,
     "doc_agent": None,
-    "ingestion_pipeline": None
+    "ingestion_pipeline": None,
+    "graph_store": None,
+    "graph_retriever": None,
+    "entity_extractor": None,
+    "relation_builder": None
 }
+
+# 图谱构建任务状态追踪
+_graph_build_tasks: Dict[str, Dict[str, Any]] = {}
 
 
 def get_components():
@@ -204,10 +213,14 @@ def _init_components():
         except Exception as e:
             logger.warning(f"Failed to initialize reranker: {e}")
     
-    # RAG Chat
+    # 初始化 Graph RAG 组件
+    _init_graph_components()
+    
+    # RAG Chat (带 graph_retriever)
     _components["rag_chat"] = RAGChat(
         hybrid_searcher=_components["hybrid_searcher"],
-        reranker=_components["reranker"]
+        reranker=_components["reranker"],
+        graph_retriever=_components["graph_retriever"]
     )
     
     # Doc Agent
@@ -224,6 +237,54 @@ def _init_components():
     )
     
     logger.info("Components initialized successfully")
+
+
+def _init_graph_components():
+    """初始化 Graph RAG 组件"""
+    import os
+    
+    neo4j_uri = os.getenv("NEO4J_URI")
+    
+    if neo4j_uri:
+        # 使用 Neo4j
+        try:
+            from src.knowledge_graph.graph_store import Neo4jStore
+            from src.knowledge_graph.graph_retriever import GraphRetriever
+            from src.knowledge_graph.entity_extractor import EntityExtractor
+            from src.knowledge_graph.relation_builder import RelationBuilder
+            
+            neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+            neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+            
+            _components["graph_store"] = Neo4jStore(
+                uri=neo4j_uri,
+                user=neo4j_user,
+                password=neo4j_password
+            )
+            _components["graph_retriever"] = GraphRetriever(_components["graph_store"])
+            _components["entity_extractor"] = EntityExtractor()
+            _components["relation_builder"] = RelationBuilder()
+            
+            logger.info(f"Graph RAG initialized with Neo4j at {neo4j_uri}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Neo4j Graph RAG: {e}")
+    else:
+        # 使用内存图存储
+        try:
+            from src.knowledge_graph.graph_store import InMemoryGraphStore
+            from src.knowledge_graph.graph_retriever import GraphRetriever
+            from src.knowledge_graph.entity_extractor import EntityExtractor
+            from src.knowledge_graph.relation_builder import RelationBuilder
+            
+            persist_path = os.getenv("GRAPH_PERSIST_PATH")
+            _components["graph_store"] = InMemoryGraphStore(persist_path=persist_path)
+            _components["graph_retriever"] = GraphRetriever(_components["graph_store"])
+            _components["entity_extractor"] = EntityExtractor()
+            _components["relation_builder"] = RelationBuilder()
+            
+            logger.info("Graph RAG initialized with InMemoryGraphStore")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Graph RAG: {e}")
 
 
 # ==================== 路由 ====================
@@ -245,7 +306,8 @@ async def health_check():
         "vector_store": _components.get("vector_store") is not None,
         "bm25_store": _components.get("bm25_store") is not None,
         "embedder": _components.get("embedder") is not None,
-        "reranker": _components.get("reranker") is not None
+        "reranker": _components.get("reranker") is not None,
+        "graph_store": _components.get("graph_store") is not None
     }
     
     return HealthResponse(
@@ -295,13 +357,24 @@ async def ingest_document(request: IngestRequest):
 
 @app.post("/api/ingest/upload", tags=["Ingestion"])
 async def upload_and_ingest(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     product: Optional[str] = None,
     version: Optional[str] = None,
-    doc_type: Optional[str] = None
+    doc_type: Optional[str] = None,
+    build_graph: bool = True,
+    async_graph: bool = True  # 新参数：是否异步构建图谱
 ):
     """
     上传并摄取文档
+    
+    Args:
+        file: 上传的 PDF 文件
+        product: 产品名称
+        version: 版本号
+        doc_type: 文档类型
+        build_graph: 是否构建知识图谱 (默认 True)
+        async_graph: 是否异步构建图谱 (默认 True，立即返回)
     """
     components = get_components()
     pipeline = components["ingestion_pipeline"]
@@ -327,6 +400,29 @@ async def upload_and_ingest(
         
         stats = pipeline.ingest_pdf(file_path, metadata)
         
+        # 构建知识图谱
+        graph_stats = None
+        if build_graph and components.get("entity_extractor"):
+            if async_graph:
+                # 异步后台构建图谱
+                _graph_build_tasks[stats.doc_id] = {
+                    "status": "pending",
+                    "started_at": datetime.now().isoformat(),
+                    "completed_at": None,
+                    "entities": 0,
+                    "relations": 0,
+                    "error": None
+                }
+                background_tasks.add_task(
+                    _build_knowledge_graph_background,
+                    stats.doc_id,
+                    components
+                )
+                graph_stats = {"status": "building", "task_id": stats.doc_id}
+            else:
+                # 同步构建
+                graph_stats = await _build_knowledge_graph(stats.doc_id, components)
+        
         return {
             "success": True,
             "doc_id": stats.doc_id,
@@ -335,11 +431,138 @@ async def upload_and_ingest(
                 "total_pages": stats.total_pages,
                 "parent_chunks": stats.parent_chunks,
                 "child_chunks": stats.child_chunks
-            }
+            },
+            "graph_stats": graph_stats
         }
     except Exception as e:
         logger.error(f"Upload and ingestion failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/graph/status/{doc_id}", tags=["Graph"])
+async def get_graph_build_status(doc_id: str):
+    """
+    查询图谱构建状态
+    
+    Args:
+        doc_id: 文档 ID
+    """
+    if doc_id not in _graph_build_tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    return _graph_build_tasks[doc_id]
+
+
+@app.get("/api/graph/tasks", tags=["Graph"])
+async def list_graph_build_tasks():
+    """列出所有图谱构建任务"""
+    return {"tasks": _graph_build_tasks}
+
+
+def _build_knowledge_graph_background(doc_id: str, components: dict):
+    """后台构建知识图谱"""
+    _graph_build_tasks[doc_id]["status"] = "running"
+    
+    try:
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(_build_knowledge_graph(doc_id, components))
+        loop.close()
+        
+        _graph_build_tasks[doc_id]["status"] = "completed"
+        _graph_build_tasks[doc_id]["completed_at"] = datetime.now().isoformat()
+        _graph_build_tasks[doc_id]["entities"] = result.get("entities", 0)
+        _graph_build_tasks[doc_id]["relations"] = result.get("relations", 0)
+        
+        logger.info(f"Background graph build completed for {doc_id}: {result}")
+        
+    except Exception as e:
+        _graph_build_tasks[doc_id]["status"] = "failed"
+        _graph_build_tasks[doc_id]["error"] = str(e)
+        _graph_build_tasks[doc_id]["completed_at"] = datetime.now().isoformat()
+        logger.error(f"Background graph build failed for {doc_id}: {e}")
+
+
+async def _build_knowledge_graph(doc_id: str, components: dict) -> dict:
+    """
+    为文档构建知识图谱（优化版）
+    
+    优化:
+    1. 使用批量实体抽取（更大批次）
+    2. 更高并行度
+    3. 减少关系构建数量
+    4. Neo4j 批量写入
+    """
+    try:
+        vector_store = components["vector_store"]
+        entity_extractor = components["entity_extractor"]
+        relation_builder = components["relation_builder"]
+        graph_store = components["graph_store"]
+        
+        # 获取该文档的所有 chunks
+        all_chunks = vector_store.get_all_chunks(filter_dict={"doc_id": doc_id})
+        
+        if not all_chunks:
+            logger.warning(f"No chunks found for doc_id: {doc_id}")
+            return {"entities": 0, "relations": 0}
+        
+        logger.info(f"Building knowledge graph for {len(all_chunks)} chunks")
+        
+        # 准备 chunks 数据
+        chunks_data = [
+            {"chunk_id": c.get("chunk_id", ""), "content": c.get("content", "")}
+            for c in all_chunks
+        ]
+        
+        # 批量抽取实体（优化：更大批次 + 更高并行度）
+        all_entities = entity_extractor.extract_from_chunks(
+            chunks_data,
+            min_content_length=80,  # 跳过短内容
+            max_concurrent=5,  # 提高并行度
+            batch_size=8  # 更大批次
+        )
+        
+        # 批量添加实体到图（使用批量接口）
+        if hasattr(graph_store, 'add_entities_batch'):
+            graph_store.add_entities_batch(all_entities)
+        else:
+            for entity in all_entities:
+                graph_store.add_entity(entity)
+        
+        logger.info(f"Added {len(all_entities)} entities to graph")
+        
+        # 构建关系（限制处理数量）
+        chunks_for_relation = chunks_data[:10] if len(chunks_data) > 10 else chunks_data
+        
+        if all_entities and chunks_for_relation:
+            relations = relation_builder.build_relations(
+                all_entities, 
+                chunks_for_relation,
+                max_concurrent=5,
+                max_chunks=10
+            )
+            # 批量添加关系
+            if hasattr(graph_store, 'add_relations_batch'):
+                graph_store.add_relations_batch(relations)
+            else:
+                for rel in relations:
+                    graph_store.add_relation(rel)
+            logger.info(f"Added {len(relations)} relations to graph")
+        else:
+            relations = []
+        
+        logger.info(f"Built graph: {len(all_entities)} entities, {len(relations)} relations")
+        
+        return {
+            "entities": len(all_entities),
+            "relations": len(relations)
+        }
+    except Exception as e:
+        logger.error(f"Failed to build knowledge graph: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"entities": 0, "relations": 0, "error": str(e)}
 
 
 # ==================== 检索接口 ====================

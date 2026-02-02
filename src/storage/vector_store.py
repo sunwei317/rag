@@ -168,6 +168,54 @@ class ChromaVectorStore(VectorStore):
         self._collection.delete(ids=ids)
         logger.info(f"Deleted {len(ids)} vectors from ChromaDB")
     
+    def get_all_chunks(
+        self,
+        filter_dict: Optional[Dict[str, Any]] = None,
+        limit: int = 10000
+    ) -> List[Dict[str, Any]]:
+        """
+        获取所有 chunks (带可选过滤)
+        
+        Args:
+            filter_dict: 过滤条件
+            limit: 最大返回数量
+            
+        Returns:
+            chunks 列表
+        """
+        # 构建过滤条件
+        where = None
+        if filter_dict:
+            where = {}
+            for k, v in filter_dict.items():
+                if isinstance(v, list):
+                    where[k] = {"$in": v}
+                else:
+                    where[k] = v
+        
+        try:
+            results = self._collection.get(
+                where=where,
+                limit=limit,
+                include=["documents", "metadatas"]
+            )
+            
+            chunks = []
+            if results and results["ids"]:
+                for i, chunk_id in enumerate(results["ids"]):
+                    chunk = {
+                        "chunk_id": chunk_id,
+                        "content": results["documents"][i] if results["documents"] else "",
+                    }
+                    if results["metadatas"] and results["metadatas"][i]:
+                        chunk.update(results["metadatas"][i])
+                    chunks.append(chunk)
+            
+            return chunks
+        except Exception as e:
+            logger.error(f"Failed to get chunks: {e}")
+            return []
+    
     def add_chunks(self, chunks, embeddings):
         """添加 Chunk 对象"""
         # 去重：避免重复 chunk_id

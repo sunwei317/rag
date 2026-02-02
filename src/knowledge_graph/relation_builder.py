@@ -39,6 +39,18 @@ class RelationType(Enum):
     USES = "uses"                   # A 使用 B
 
 
+# 核心关系类型白名单 - 只保留这些高价值关系
+CORE_RELATION_TYPES = {
+    RelationType.DEPENDS_ON,
+    RelationType.REQUIRES,
+    RelationType.BELONGS_TO,
+    RelationType.CONTAINS,
+    RelationType.CONFIGURES,
+    RelationType.IMPLEMENTS,
+    RelationType.CALLS,
+}
+
+
 @dataclass
 class Relation:
     """
@@ -158,14 +170,18 @@ class RelationBuilder:
         llm_client=None,
         model: str = "gpt-4.1-mini",
         min_confidence: float = 0.5,
-        use_cooccurrence: bool = True,
-        cooccurrence_threshold: int = 3
+        use_cooccurrence: bool = False,  # 默认关闭共现关系（减少数量）
+        cooccurrence_threshold: int = 5,  # 提高共现阈值
+        use_core_relations_only: bool = True,  # 只使用核心关系类型
+        max_relations_per_chunk: int = 10  # 每个 chunk 最多关系数
     ):
         self.llm_client = llm_client
         self.model = model
         self.min_confidence = min_confidence
         self.use_cooccurrence = use_cooccurrence
         self.cooccurrence_threshold = cooccurrence_threshold
+        self.use_core_relations_only = use_core_relations_only
+        self.max_relations_per_chunk = max_relations_per_chunk
         
         self._init_llm_client()
         
@@ -185,46 +201,73 @@ class RelationBuilder:
     def build_relations(
         self,
         entities: List[Entity],
-        chunks: List[Dict[str, Any]]
+        chunks: List[Dict[str, Any]],
+        max_concurrent: int = 3,
+        max_chunks: int = 15
     ) -> List[Relation]:
         """
-        构建实体间的关系
+        构建实体间的关系（优化版）
         
         Args:
             entities: 实体列表
             chunks: 文档 chunks，用于提供上下文
+            max_concurrent: 最大并发数
+            max_chunks: 最大处理 chunk 数量
             
         Returns:
             关系列表
         """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
         # 构建实体名称映射
         self._build_entity_map(entities)
         
         all_relations = []
         
-        # 1. LLM 抽取语义关系
-        for chunk in chunks:
-            chunk_id = chunk.get("chunk_id", "")
+        # 1. 筛选有实体的 chunks
+        chunks_with_entities = []
+        for chunk in chunks[:max_chunks]:  # 限制处理数量
             content = chunk.get("content", "")
-            
-            # 找到该 chunk 中出现的实体
             chunk_entities = self._find_entities_in_chunk(entities, content)
-            
             if len(chunk_entities) >= 2:
-                relations = self._extract_relations_llm(
-                    content, chunk_entities, chunk_id
-                )
-                all_relations.extend(relations)
+                chunks_with_entities.append({
+                    "chunk": chunk,
+                    "entities": chunk_entities
+                })
         
-        # 2. 基于共现的关系推断
+        logger.info(f"Processing {len(chunks_with_entities)} chunks for relations")
+        
+        # 2. 并行 LLM 抽取语义关系
+        if chunks_with_entities and self.llm_client:
+            with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+                futures = {}
+                for item in chunks_with_entities:
+                    chunk = item["chunk"]
+                    chunk_entities = item["entities"]
+                    future = executor.submit(
+                        self._extract_relations_llm,
+                        chunk.get("content", ""),
+                        chunk_entities,
+                        chunk.get("chunk_id", "")
+                    )
+                    futures[future] = chunk.get("chunk_id", "")
+                
+                for future in as_completed(futures):
+                    try:
+                        relations = future.result()
+                        all_relations.extend(relations)
+                    except Exception as e:
+                        logger.error(f"Relation extraction failed: {e}")
+        
+        # 3. 基于共现的关系推断（快速，不需要 LLM）
         if self.use_cooccurrence:
             cooc_relations = self._build_cooccurrence_relations(entities)
             all_relations.extend(cooc_relations)
         
-        # 3. 去重和合并
+        # 4. 去重和合并
         merged_relations = self._merge_relations(all_relations)
         
-        # 4. 过滤低置信度
+        # 5. 过滤低置信度
         filtered_relations = [
             r for r in merged_relations 
             if r.confidence >= self.min_confidence
@@ -318,6 +361,10 @@ class RelationBuilder:
         relations = []
         
         for item in result.get("relations", []):
+            # 限制每个 chunk 的关系数量
+            if len(relations) >= self.max_relations_per_chunk:
+                break
+                
             try:
                 source_name = item.get("source", "").lower()
                 target_name = item.get("target", "").lower()
@@ -335,6 +382,10 @@ class RelationBuilder:
                 
                 # 映射关系类型
                 relation_type = self._map_relation_type(type_str)
+                
+                # 过滤非核心关系类型
+                if self.use_core_relations_only and relation_type not in CORE_RELATION_TYPES:
+                    continue
                 
                 relation = Relation(
                     relation_id=Relation.generate_id(source_id, target_id, relation_type),
