@@ -17,6 +17,7 @@
 | 📊 **召回监控** | 生产级检索质量监控与告警 |
 | 🕸️ **Graph RAG** | 🆕 知识图谱增强，支持跨文档关联与多跳推理 |
 | 📤 **数据驱动文档生成** | 🆕 严格基于数据库数据生成文档，不编造内容 |
+| 📥 **文档导出** | 🆕 支持导出为 Markdown、Word (DOCX)、PDF 格式 |
 
 ---
 
@@ -496,6 +497,40 @@ curl "http://localhost:8000/api/generate/preview-data"
 #   "entities_by_type": {"api": 11, "config": 33, "error": 5, ...}
 # }
 ```
+
+#### 3.5 🆕 文档导出 (Markdown/Word/PDF)
+
+生成的文档可以导出为多种格式：
+
+```bash
+# 导出为 Word 文档 (DOCX)
+curl -X POST "http://localhost:8000/api/generate/export/docx" \
+  -F "content=# 文档标题
+
+这是文档内容..." \
+  -F "title=我的技术文档" \
+  --output my_document.docx
+
+# 导出为 PDF 文档
+curl -X POST "http://localhost:8000/api/generate/export/pdf" \
+  -F "content=# 文档标题
+
+这是文档内容..." \
+  -F "title=我的技术文档" \
+  --output my_document.pdf
+```
+
+**支持的导出格式：**
+
+| 格式 | 端点 | 说明 |
+|------|------|------|
+| Markdown | 直接下载 | 原始 Markdown 文本 |
+| Word (DOCX) | `/api/generate/export/docx` | 使用 python-docx 生成 |
+| PDF | `/api/generate/export/pdf` | 使用 WeasyPrint 生成，支持中文字体 |
+
+**文件命名规则：**
+- 格式：`{文档类型}_{标题}_{日期}.{扩展名}`
+- 示例：`API参考文档_SmartHome_Pro_20260202.pdf`
 
 ---
 

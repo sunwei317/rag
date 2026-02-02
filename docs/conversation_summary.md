@@ -1082,4 +1082,78 @@ print(document.to_markdown())
 
 ---
 
+### 对话 20: 文档导出功能 (Markdown/Word/PDF)
+
+**用户：** 添加文档下载功能，支持 DOCX 和 PDF 格式导出
+
+**Copilot：** 实现了完整的文档导出功能：
+
+**后端更新：**
+- 添加 `weasyprint>=60.0` 和 `markdown2>=2.4.0` 依赖
+- 新增 `/api/generate/export/docx` 端点 - 导出为 Word 文档
+- 新增 `/api/generate/export/pdf` 端点 - 导出为 PDF 文档
+- 使用 `Form()` 参数接收表单数据
+
+**前端更新：**
+- 添加下载按钮组：Markdown、Word、PDF
+- 实现 `generateFileName()` 函数，根据文档类型生成文件名
+- 文件名格式：`{文档类型}_{标题}_{日期}.{扩展名}`
+
+**Docker 更新：**
+- 添加 PDF 生成所需系统依赖：
+  - `libpango-1.0-0`, `libpangocairo-1.0-0`, `libgdk-pixbuf-2.0-0`
+  - `fonts-noto-cjk`, `fonts-wqy-microhei` (中文字体支持)
+
+**API 示例：**
+```bash
+# 导出为 DOCX
+curl -X POST "http://localhost:8000/api/generate/export/docx" \
+  -F "content=# 文档标题\n\n文档内容..." \
+  -F "title=我的文档" \
+  --output document.docx
+
+# 导出为 PDF
+curl -X POST "http://localhost:8000/api/generate/export/pdf" \
+  -F "content=# 文档标题\n\n文档内容..." \
+  -F "title=我的文档" \
+  --output document.pdf
+```
+
+---
+
+### 对话 21: UI 优化 - 自动清除和标题修复
+
+**用户：** 
+1. 点击生成文档时，自动清除之前的生成结果
+2. 生成文档的首行标题应该根据选择的文档类型显示
+
+**Copilot：** 完成了两项优化：
+
+**1. 自动清除生成结果：**
+- 在生成按钮点击处理器中添加清除逻辑
+- 隐藏输出区域、清空内容、重置变量
+
+```javascript
+// 清除之前的生成结果
+document.getElementById('output-area').style.display = 'none';
+document.getElementById('output-content').textContent = '';
+generatedContent = '';
+generatedTitle = '';
+generatedDocType = '';
+```
+
+**2. 修复文档标题显示：**
+更新 `data_driven_writer.py` 中的标题生成函数：
+
+| 文档类型 | 标题显示 |
+|----------|----------|
+| `api_reference` | API 参考手册 |
+| `user_manual` | 用户手册 |
+| `installation_guide` | 安装指南 |
+| `general` | 技术文档 |
+
+如果数据库中有产品信息，标题格式为：`{产品名称} {文档类型}`
+
+---
+
 *完整对话记录 - 更新时间: 2026-02-02*
