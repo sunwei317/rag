@@ -170,10 +170,27 @@ class ChromaVectorStore(VectorStore):
     
     def add_chunks(self, chunks, embeddings):
         """添加 Chunk 对象"""
-        ids = [c.chunk_id for c in chunks]
-        contents = [c.content for c in chunks]
-        metadatas = [c.to_dict() for c in chunks]
-        embs = [e.embedding for e in embeddings]
+        # 去重：避免重复 chunk_id
+        seen_ids = set()
+        unique_chunks = []
+        unique_embeddings = []
+        
+        for c, e in zip(chunks, embeddings):
+            if c.chunk_id not in seen_ids:
+                seen_ids.add(c.chunk_id)
+                unique_chunks.append(c)
+                unique_embeddings.append(e)
+            else:
+                logger.warning(f"Skipping duplicate chunk_id: {c.chunk_id}")
+        
+        if not unique_chunks:
+            logger.warning("No unique chunks to add")
+            return
+        
+        ids = [c.chunk_id for c in unique_chunks]
+        contents = [c.content for c in unique_chunks]
+        metadatas = [c.to_dict() for c in unique_chunks]
+        embs = [e.embedding for e in unique_embeddings]
         
         self.add(ids, embs, contents, metadatas)
     

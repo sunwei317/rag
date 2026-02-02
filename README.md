@@ -15,6 +15,7 @@
 | 🔄 **混合检索** | Vector + BM25 双路检索，RRF 融合，提升召回率 |
 | 🎯 **多路召回** | 查询扩展 + 并行检索，解决词汇鸿沟问题 |
 | 📊 **召回监控** | 生产级检索质量监控与告警 |
+| 🕸️ **Graph RAG** | 🆕 知识图谱增强，支持跨文档关联与多跳推理 |
 
 ---
 
@@ -57,6 +58,14 @@
 │  │  └────────────┘  └────────────┘  └────────────┘  └────────────┘    │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                     4. 🆕 Graph RAG 知识图谱增强                       │   │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐    │   │
+│  │  │ 实体抽取    │  │ 关系构建    │  │ 图谱检索    │  │ 上下文融合  │    │   │
+│  │  │ LLM+规则   │  │ 语义+共现   │  │ 子图提取    │  │ Chunk+Graph │    │   │
+│  │  └────────────┘  └────────────┘  └────────────┘  └────────────┘    │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -84,8 +93,16 @@ rag/
 │   │   ├── terminology_dict.py       # ⭐ 领域术语词典
 │   │   └── recall_monitor.py         # ⭐ 召回率监控
 │   │
+│   ├── knowledge_graph/        # 🆕 知识图谱模块 (Graph RAG)
+│   │   ├── entity_extractor.py # 实体抽取 (LLM + 规则)
+│   │   ├── relation_builder.py # 关系构建
+│   │   ├── graph_store.py      # 图存储 (Neo4j/内存)
+│   │   ├── graph_retriever.py  # 图谱检索
+│   │   ├── graph_rag.py        # Graph RAG 融合
+│   │   └── pipeline.py         # 图谱构建 Pipeline
+│   │
 │   ├── generation/             # 生成模块
-│   │   ├── rag_chat.py         # 检索问答
+│   │   ├── rag_chat.py         # 检索问答 (支持 Graph RAG)
 │   │   ├── doc_agent.py        # 文档生成代理
 │   │   ├── outline_planner.py  # 大纲规划 (7种模板)
 │   │   ├── section_writer.py   # 分节写作
@@ -251,7 +268,125 @@ print(f"父块数: {stats.parent_chunks}")
 print(f"子块数: {stats.child_chunks}")
 ```
 
-#### 1.3 PDF 解析细节
+---
+
+### 二、🆕 Graph RAG 知识图谱
+
+Graph RAG 为传统 RAG 增加了知识图谱能力，支持跨文档实体关联和多跳推理。
+
+#### 2.1 构建知识图谱
+
+```python
+from src.knowledge_graph import (
+    GraphBuildPipeline,
+    InMemoryGraphStore,
+    create_graph_pipeline
+)
+
+# 方式一：快速创建 Pipeline
+pipeline = create_graph_pipeline(
+    persist_path="./data/knowledge_graph.json",
+    llm_model="gpt-4.1-mini"
+)
+
+# 从 chunks 构建图谱
+chunks = [
+    {"chunk_id": "c1", "content": "MySQL 8.0 需要 JDK 11..."},
+    {"chunk_id": "c2", "content": "Redis 可作为 MySQL 缓存..."},
+]
+result = pipeline.build(chunks)
+
+print(f"实体数: {result.entity_count}")
+print(f"关系数: {result.relation_count}")
+```
+
+#### 2.2 使用 Graph RAG 查询
+
+```python
+from src.knowledge_graph import GraphRAG, GraphRetriever, InMemoryGraphStore
+
+# 加载图谱
+graph_store = InMemoryGraphStore(persist_path="./data/knowledge_graph.json")
+
+# 创建 Graph RAG
+graph_rag = GraphRAG(
+    hybrid_searcher=hybrid_searcher,  # 现有的向量检索器
+    graph_store=graph_store,
+    model="gpt-4.1"
+)
+
+# 智能查询 (自动识别问题类型)
+response = graph_rag.smart_query("MySQL 需要什么依赖？")
+
+print(f"答案: {response.answer}")
+print(f"图谱洞察: {response.graph_insights}")
+```
+
+#### 2.3 图谱检索
+
+```python
+from src.knowledge_graph import GraphRetriever
+
+retriever = GraphRetriever(graph_store)
+
+# 检索相关子图
+subgraph = retriever.retrieve(
+    query="如何优化 MySQL 性能",
+    expand_depth=2  # 扩展2跳邻居
+)
+
+# 转换为文本上下文
+context = subgraph.to_context_text()
+print(context)
+
+# 查找实体间路径
+paths = retriever.find_paths("MySQL", "Redis", max_depth=3)
+```
+
+#### 2.4 支持的实体和关系类型
+
+**实体类型:**
+| 类型 | 说明 | 示例 |
+|------|------|------|
+| `product` | 产品/组件 | MySQL, Redis |
+| `api` | API/接口 | `/api/v1/users` |
+| `config` | 配置项 | `max_connections` |
+| `version` | 版本号 | `v1.0.0` |
+| `dependency` | 依赖 | JDK, Python |
+| `command` | 命令 | `mysql -u root` |
+
+**关系类型:**
+| 类型 | 说明 | 示例 |
+|------|------|------|
+| `depends_on` | 依赖 | MySQL → JDK |
+| `requires` | 需要 | 安装 → 配置 |
+| `belongs_to` | 属于 | API → 模块 |
+| `configures` | 配置 | 参数 → 组件 |
+| `related_to` | 关联 | MySQL ↔ Redis |
+
+#### 2.5 使用 Neo4j (生产环境)
+
+```python
+from src.knowledge_graph import Neo4jStore, GraphBuildPipeline
+
+# 连接 Neo4j
+graph_store = Neo4jStore(
+    uri="bolt://localhost:7687",
+    user="neo4j",
+    password="password"
+)
+
+# 创建索引
+graph_store.create_indexes()
+
+# 使用 Neo4j 构建图谱
+pipeline = GraphBuildPipeline(graph_store=graph_store)
+pipeline.build(chunks)
+```
+
+---
+
+### 三、RAG 问答 (支持 Graph RAG)
 
 PDF 解析器会自动提取：
 

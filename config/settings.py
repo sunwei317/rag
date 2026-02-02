@@ -181,6 +181,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"  # 忽略额外的环境变量
     
     def ensure_dirs(self):
         """确保必要的目录存在"""

@@ -67,6 +67,7 @@ class RAGChat:
     3. 重排序
     4. 父子索引上下文扩展
     5. 引用追溯
+    6. [NEW] Graph RAG 增强 - 知识图谱上下文融合
     """
     
     def __init__(
@@ -77,7 +78,11 @@ class RAGChat:
         llm_client=None,
         model: str = "gpt-4.1",
         parent_chunk_store=None,  # 用于获取父 Chunk
-        window_size: int = 2  # 上下文窗口大小
+        window_size: int = 2,  # 上下文窗口大小
+        # Graph RAG 相关参数
+        graph_retriever=None,  # 图谱检索器
+        use_graph_context: bool = True,  # 是否使用图谱上下文
+        graph_context_weight: float = 0.3  # 图谱上下文权重
     ):
         self.hybrid_searcher = hybrid_searcher
         self.reranker = reranker
@@ -86,6 +91,11 @@ class RAGChat:
         self.model = model
         self.parent_chunk_store = parent_chunk_store
         self.window_size = window_size
+        
+        # Graph RAG 组件
+        self.graph_retriever = graph_retriever
+        self.use_graph_context = use_graph_context
+        self.graph_context_weight = graph_context_weight
         
         self._init_llm_client()
     
@@ -109,7 +119,8 @@ class RAGChat:
         top_k: int = 5,
         use_query_transform: bool = True,
         use_rerank: bool = True,
-        expand_context: bool = True
+        expand_context: bool = True,
+        use_graph: bool = True  # 是否使用图谱增强
     ) -> ChatResponse:
         """
         回答问题
@@ -121,11 +132,28 @@ class RAGChat:
             use_query_transform: 是否使用查询转换
             use_rerank: 是否使用重排序
             expand_context: 是否扩展到父 Chunk
+            use_graph: 是否使用 Graph RAG 增强
         
         Returns:
             ChatResponse: 包含答案和引用
         """
         logger.info(f"Processing question: {question[:50]}...")
+        
+        # 0. 图谱检索 (Graph RAG)
+        graph_context = ""
+        graph_entities = []
+        if use_graph and self.use_graph_context and self.graph_retriever:
+            try:
+                subgraph = self.graph_retriever.retrieve(
+                    query=question,
+                    expand_depth=2
+                )
+                if not subgraph.is_empty():
+                    graph_context = subgraph.to_context_text(max_length=1500)
+                    graph_entities = [e.name for e in subgraph.query_entities]
+                    logger.info(f"Graph context: {len(subgraph.entities)} entities, {len(subgraph.relations)} relations")
+            except Exception as e:
+                logger.warning(f"Graph retrieval failed: {e}")
         
         # 1. 查询转换
         queries = [question]
@@ -203,8 +231,8 @@ class RAGChat:
                 content_preview=r.content[:200]
             ))
         
-        # 6. 生成答案
-        answer = self._generate_answer(question, contexts, references)
+        # 6. 生成答案 (包含图谱上下文)
+        answer = self._generate_answer(question, contexts, references, graph_context)
         
         return ChatResponse(
             answer=answer,
@@ -234,7 +262,8 @@ class RAGChat:
         self,
         question: str,
         contexts: List[str],
-        references: List[Reference]
+        references: List[Reference],
+        graph_context: str = ""
     ) -> str:
         """生成答案"""
         if not self.llm_client:
@@ -246,6 +275,10 @@ class RAGChat:
             for i, (ctx, ref) in enumerate(zip(contexts, references))
         ])
         
+        # 添加图谱上下文
+        if graph_context:
+            context_text = f"{graph_context}\n\n---\n\n{context_text}"
+        
         prompt = f"""你是一个技术文档助手。请根据以下参考资料回答用户的问题。
 
 要求:
@@ -253,6 +286,7 @@ class RAGChat:
 2. 如果参考资料不足以回答问题，请明确说明
 3. 在回答中引用来源，格式为 [来源 X]
 4. 使用清晰、专业的技术文档风格
+5. 如果有知识图谱信息，请利用其中的实体关系来增强回答
 
 参考资料:
 {context_text}

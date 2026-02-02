@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # 创建数据目录
-RUN mkdir -p /app/data/chroma /app/data/uploads
+RUN mkdir -p /app/data/chroma /app/data/uploads /app/data/neo4j
 
 # 暴露端口
 EXPOSE 8000
