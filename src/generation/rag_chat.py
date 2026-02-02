@@ -112,6 +112,86 @@ class RAGChat:
             except Exception as e:
                 logger.warning(f"Failed to init LLM client: {e}")
     
+    def _process_conversation_history(
+        self, 
+        conversation_history: Optional[List[Dict[str, str]]], 
+        max_recent_turns: int = 3,
+        max_total_chars: int = 2000
+    ) -> str:
+        """
+        智能处理对话历史，支持长对话场景
+        
+        策略:
+        1. 最近 N 轮对话保持完整
+        2. 较早的对话提取关键实体和主题
+        3. 总长度控制在 max_total_chars 以内
+        
+        Args:
+            conversation_history: 完整对话历史
+            max_recent_turns: 保持完整的最近轮数
+            max_total_chars: 最大总字符数
+        
+        Returns:
+            str: 处理后的对话上下文
+        """
+        if not conversation_history or len(conversation_history) == 0:
+            return ""
+        
+        recent_count = max_recent_turns * 2  # 每轮 2 条消息
+        
+        # 分离最近对话和历史对话
+        if len(conversation_history) <= recent_count:
+            # 对话较短，全部保留
+            recent_history = conversation_history
+            older_history = []
+        else:
+            recent_history = conversation_history[-recent_count:]
+            older_history = conversation_history[:-recent_count]
+        
+        context_parts = []
+        
+        # 1. 处理较早的对话历史 - 提取关键信息
+        if older_history:
+            # 提取用户提过的问题主题
+            user_topics = []
+            for msg in older_history:
+                if msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    # 提取前30字作为主题摘要
+                    topic = content[:30].replace("\n", " ").strip()
+                    if topic:
+                        user_topics.append(topic)
+            
+            if user_topics:
+                # 只保留最近的 5 个历史主题
+                topics_summary = "、".join(user_topics[-5:])
+                context_parts.append(f"[历史讨论主题: {topics_summary}]")
+        
+        # 2. 处理最近的对话 - 保持完整
+        for msg in recent_history:
+            role = "用户" if msg.get("role") == "user" else "助手"
+            content = msg.get("content", "")
+            
+            # 对于助手回复，只保留前 150 字
+            if msg.get("role") == "assistant":
+                content = content[:150]
+                if len(msg.get("content", "")) > 150:
+                    content += "..."
+            else:
+                # 用户消息保留前 200 字
+                content = content[:200]
+            
+            context_parts.append(f"{role}: {content}")
+        
+        # 3. 组合并控制总长度
+        context_str = "\n".join(context_parts)
+        
+        # 如果超过限制，进一步压缩
+        if len(context_str) > max_total_chars:
+            context_str = context_str[:max_total_chars] + "\n...[对话历史已截断]"
+        
+        return context_str
+
     def _is_short_query(self, query: str, min_chars: int = 8, min_words: int = 2) -> bool:
         """
         检查查询是否太短
@@ -203,29 +283,28 @@ class RAGChat:
             return None
         
         try:
-            # 构建对话上下文
+            # 使用智能对话历史处理
             context_str = ""
             if conversation_history and len(conversation_history) > 0:
-                # 只取最近 3 轮对话作为上下文
-                recent_history = conversation_history[-6:]  # 3轮 = 6条消息
-                context_parts = []
-                for msg in recent_history:
-                    role = "用户" if msg.get("role") == "user" else "助手"
-                    content = msg.get("content", "")[:200]  # 截取前200字
-                    context_parts.append(f"{role}: {content}")
-                context_str = "\n".join(context_parts)
-                context_str = f"\n\n对话历史:\n{context_str}\n"
+                processed_context = self._process_conversation_history(
+                    conversation_history,
+                    max_recent_turns=3,
+                    max_total_chars=1500
+                )
+                if processed_context:
+                    context_str = f"\n\n对话历史:\n{processed_context}\n"
             
             prompt = f"""你是一个技术文档检索助手。用户输入了一个查询，请结合对话上下文将其扩展成一个完整、明确的问题。{context_str}
 当前用户查询: {query}
 
 要求:
-1. 理解对话上下文，解析指代词（如"它"、"这个"、"那个"）
-2. 将不完整的查询补充完整，使其可以独立理解
-3. 保持用户的原始意图
-4. 如果是技术术语且没有上下文，可以添加"是什么"、"如何使用"等
-5. 只输出扩展后的问题，不要其他解释
-6. 控制在 50 字以内
+1. 理解对话上下文，解析指代词（如"它"、"这个"、"那个"、"第一个问题"等）
+2. 如果提到"第N个问题"，找到对话历史中对应的问题
+3. 将不完整的查询补充完整，使其可以独立理解
+4. 保持用户的原始意图
+5. 如果是技术术语且没有上下文，可以添加"是什么"、"如何使用"等
+6. 只输出扩展后的问题，不要其他解释
+7. 控制在 50 字以内
 
 扩展后的完整问题:"""
 
