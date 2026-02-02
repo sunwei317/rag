@@ -718,7 +718,8 @@ class DataDrivenWriter:
             "api_reference": "API 参考手册",
             "user_manual": "用户手册",
             "installation_guide": "安装指南",
-            "troubleshooting": "故障排除指南"
+            "troubleshooting": "故障排除指南",
+            "general": "技术文档"
         }
         
         doc_title = type_titles.get(doc_type, "技术文档")
@@ -889,13 +890,21 @@ class DataDrivenWriter:
     def _extract_title_from_data(self, entities: List[Dict], doc_type: str) -> str:
         """从数据中提取标题"""
         # 查找产品名
+        product_name = ""
         for e in entities:
             if e.get("type") == "product":
-                return f"{e.get('name', '')} 技术文档"
+                product_name = e.get('name', '')
+                break
         
         type_titles = {
             "api_reference": "API 参考手册",
-            "user_manual": "用户手册"
+            "user_manual": "用户手册",
+            "installation_guide": "安装指南",
+            "general": "技术文档"
         }
         
-        return type_titles.get(doc_type, "技术文档")
+        doc_title = type_titles.get(doc_type, "技术文档")
+        
+        if product_name:
+            return f"{product_name} {doc_title}"
+        return doc_title

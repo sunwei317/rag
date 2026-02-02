@@ -974,6 +974,23 @@
         // Store generated content for downloads
         let generatedContent = '';
         let generatedTitle = '';
+        let generatedDocType = '';
+        
+        // 文档类型对应的文件名前缀
+        const docTypeNames = {
+            'api_reference': 'API参考文档',
+            'user_manual': '用户手册',
+            'installation_guide': '安装指南',
+            'general': '技术文档'
+        };
+        
+        // 生成带时间戳的文件名
+        function generateFileName(ext) {
+            const typeName = docTypeNames[generatedDocType] || '技术文档';
+            const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+            const shortTitle = generatedTitle.slice(0, 20).replace(/[^\w\u4e00-\u9fff]/g, '_');
+            return `${typeName}_${shortTitle}_${timestamp}.${ext}`;
+        }
 
         document.getElementById('generate-btn').addEventListener('click', async () => {
             const docType = document.querySelector('.option-card.selected')?.dataset.type || 'api_reference';
@@ -984,6 +1001,13 @@
             showStatus('generate-status', '<span class="spinner"></span> 正在生成文档，请稍候...', 'loading');
             document.getElementById('generate-btn').disabled = true;
             document.getElementById('download-buttons').style.display = 'none';
+            
+            // 清除之前的生成结果
+            document.getElementById('output-area').style.display = 'none';
+            document.getElementById('output-content').textContent = '';
+            generatedContent = '';
+            generatedTitle = '';
+            generatedDocType = '';
 
             try {
                 const response = await fetch(`${API_BASE}/api/generate/from-database`, {
@@ -1008,6 +1032,7 @@
                     // Store for downloads
                     generatedContent = result.content || '';
                     generatedTitle = result.title || title || '技术文档';
+                    generatedDocType = docType;
                     document.getElementById('download-buttons').style.display = 'flex';
                 } else {
                     showStatus('generate-status', `❌ 生成失败: ${result.detail}`, 'error');
@@ -1026,7 +1051,7 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `${generatedTitle}.md`;
+            a.download = generateFileName('md');
             a.click();
             URL.revokeObjectURL(url);
         });
@@ -1054,7 +1079,7 @@
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `${generatedTitle}.docx`;
+                    a.download = generateFileName('docx');
                     a.click();
                     URL.revokeObjectURL(url);
                 } else {
@@ -1092,7 +1117,7 @@
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `${generatedTitle}.pdf`;
+                    a.download = generateFileName('pdf');
                     a.click();
                     URL.revokeObjectURL(url);
                 } else {
