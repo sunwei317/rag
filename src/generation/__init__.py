@@ -6,6 +6,7 @@ from .outline_planner import OutlinePlanner, DocumentOutline, SectionPlan
 from .section_writer import SectionWriter, SectionContent, GeneratedDocument
 from .consistency_checker import ConsistencyChecker, ConsistencyReport, ConsistencyIssue
 from .doc_agent import DocAgent, GenerationConfig, GenerationResult, generate_document
+from .data_driven_writer import DataDrivenWriter, DataDrivenDocument, DataSection
 
 __all__ = [
     "RAGChat",
@@ -23,5 +24,8 @@ __all__ = [
     "DocAgent",
     "GenerationConfig",
     "GenerationResult",
-    "generate_document"
+    "generate_document",
+    "DataDrivenWriter",
+    "DataDrivenDocument",
+    "DataSection"
 ]

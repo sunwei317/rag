@@ -16,6 +16,7 @@
 | 🎯 **多路召回** | 查询扩展 + 并行检索，解决词汇鸿沟问题 |
 | 📊 **召回监控** | 生产级检索质量监控与告警 |
 | 🕸️ **Graph RAG** | 🆕 知识图谱增强，支持跨文档关联与多跳推理 |
+| 📤 **数据驱动文档生成** | 🆕 严格基于数据库数据生成文档，不编造内容 |
 
 ---
 
@@ -106,7 +107,8 @@ rag/
 │   │   ├── doc_agent.py        # 文档生成代理
 │   │   ├── outline_planner.py  # 大纲规划 (7种模板)
 │   │   ├── section_writer.py   # 分节写作
-│   │   └── consistency_checker.py # 一致性校验
+│   │   ├── consistency_checker.py # 一致性校验
+│   │   └── data_driven_writer.py  # 🆕 数据驱动文档生成
 │   │
 │   ├── storage/                # 存储模块
 │   │   ├── vector_store.py     # 向量库 (Chroma/Milvus)
@@ -198,6 +200,10 @@ python run_server.py
 ```bash
 # 仅启动应用
 docker-compose up -d rag-app
+
+# 🆕 启动完整服务 (含 Neo4j Graph RAG)
+docker-compose --profile graphrag up -d
+# Neo4j Web UI: http://localhost:7474 (用户: neo4j, 密码: graphrag123)
 
 # 启动完整服务 (含 Milvus)
 docker-compose --profile milvus up -d
@@ -386,7 +392,114 @@ pipeline.build(chunks)
 
 ---
 
-### 三、RAG 问答 (支持 Graph RAG)
+### 三、🆕 数据驱动文档生成
+
+从知识图谱和向量存储中严格提取数据生成技术文档，不编造内容。
+
+#### 3.1 通过 API 生成
+
+```bash
+# 标准模式生成
+curl -X POST "http://localhost:8000/api/generate/from-database" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "doc_type": "api_reference",
+    "title": "SmartHome Pro API 技术文档",
+    "use_llm_formatting": true
+  }'
+
+# 简略模式 (更短的文档)
+curl -X POST "http://localhost:8000/api/generate/from-database" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "doc_type": "api_reference",
+    "detail_level": "brief",
+    "max_sections": 5
+  }'
+
+# 只包含特定实体类型
+curl -X POST "http://localhost:8000/api/generate/from-database" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "doc_type": "api_reference",
+    "entity_types": ["api", "config", "error"],
+    "include_relations": false
+  }'
+```
+
+#### 3.2 文档长度和细节控制参数
+
+| 参数 | 类型 | 说明 | 默认值 |
+|------|------|------|--------|
+| `detail_level` | string | 细节级别: `brief`, `standard`, `detailed` | `standard` |
+| `max_entities_per_type` | int | 每种实体类型最多包含数量 | 按 detail_level |
+| `max_sections` | int | 最大章节数 | 按 detail_level |
+| `include_relations` | bool | 是否包含实体关系章节 | `true` |
+| `entity_types` | list | 要包含的实体类型列表 | 全部 |
+| `use_llm_formatting` | bool | 是否用 LLM 美化格式 | `true` |
+
+**细节级别预设：**
+
+| 级别 | 每类实体数 | 章节数 | 包含描述 | 包含别名 | 包含关系 |
+|------|-----------|--------|----------|----------|----------|
+| `brief` | 最多 5 | 最多 5 | ❌ | ❌ | ❌ |
+| `standard` | 最多 20 | 最多 10 | ✅ | ❌ | ✅ |
+| `detailed` | 无限制 | 无限制 | ✅ | ✅ | ✅ |
+
+#### 3.3 通过 Python SDK
+
+```python
+from src.generation import DataDrivenWriter
+from src.knowledge_graph import Neo4jStore
+from src.storage import create_vector_store
+
+# 初始化
+graph_store = Neo4jStore(uri="bolt://localhost:7687", user="neo4j", password="graphrag123")
+vector_store = create_vector_store()
+
+# 创建写作器 (自定义控制参数)
+writer = DataDrivenWriter(
+    graph_store=graph_store,
+    vector_store=vector_store,
+    detail_level="standard",
+    max_entities_per_type=10,
+    max_sections=8,
+    include_relations=True,
+    entity_types=["api", "config", "command", "error"]
+)
+
+# 生成文档
+document = writer.generate_with_llm_formatting(
+    doc_type="api_reference",
+    title="我的 API 文档"
+)
+
+# 保存为 Markdown
+with open("output.md", "w") as f:
+    f.write(document.to_markdown())
+
+print(f"实体数: {document.entity_count}")
+print(f"章节数: {len(document.sections)}")
+```
+
+#### 3.4 预览可用数据
+
+```bash
+# 预览数据库中的数据统计
+curl "http://localhost:8000/api/generate/preview-data"
+
+# 返回示例:
+# {
+#   "entity_count": 97,
+#   "relation_count": 11,
+#   "chunk_count": 585,
+#   "entities_by_type": {"api": 11, "config": 33, "error": 5, ...}
+# }
+```
+
+---
+
+### 四、RAG 问答 (支持 Graph RAG)
 
 PDF 解析器会自动提取：
 

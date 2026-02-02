@@ -717,6 +717,157 @@ async def list_doc_types():
     }
 
 
+class DataDrivenGenerateRequest(BaseModel):
+    """数据驱动文档生成请求"""
+    doc_type: str = "api_reference"
+    doc_id: Optional[str] = None
+    title: Optional[str] = None
+    use_llm_formatting: bool = True
+    
+    # 文档长度控制
+    max_entities_per_type: Optional[int] = None  # 每种类型最多包含的实体数
+    max_sections: Optional[int] = None  # 最大章节数
+    
+    # 内容细节控制
+    detail_level: str = "standard"  # brief, standard, detailed
+    include_relations: bool = True  # 是否包含关系章节
+    entity_types: Optional[List[str]] = None  # 要包含的实体类型，如 ["api", "config", "error"]
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "doc_type": "api_reference",
+                "title": "智能家居系统 API 参考手册",
+                "use_llm_formatting": True,
+                "detail_level": "standard",
+                "max_entities_per_type": 20,
+                "max_sections": 10,
+                "include_relations": True,
+                "entity_types": ["api", "config", "command", "error"]
+            }
+        }
+
+
+@app.post("/api/generate/from-database", tags=["Generation"])
+async def generate_from_database(request: DataDrivenGenerateRequest):
+    """
+    从数据库生成技术文档
+    
+    严格基于知识图谱和向量存储中的数据生成文档，
+    不会添加数据库中不存在的信息。
+    
+    ## 控制参数说明：
+    
+    **文档长度控制：**
+    - max_entities_per_type: 每种实体类型最多包含的数量（如设为5，则每类最多5个实体）
+    - max_sections: 最大章节数（如设为3，只生成前3个章节）
+    
+    **内容细节控制：**
+    - detail_level: 细节级别
+        - "brief": 简略模式，只列出实体名称，每类最多5个，不含关系
+        - "standard": 标准模式，包含描述，每类最多20个
+        - "detailed": 详细模式，包含所有信息，无数量限制
+    - include_relations: 是否包含关系章节（True/False）
+    - entity_types: 指定要包含的实体类型列表，如 ["api", "config", "error"]
+    """
+    components = get_components()
+    
+    from src.generation import DataDrivenWriter
+    
+    try:
+        writer = DataDrivenWriter(
+            graph_store=components.get("graph_store"),
+            vector_store=components.get("vector_store"),
+            max_entities_per_type=request.max_entities_per_type,
+            max_sections=request.max_sections,
+            detail_level=request.detail_level,
+            include_relations=request.include_relations,
+            entity_types=request.entity_types
+        )
+        
+        if request.use_llm_formatting:
+            document = writer.generate_with_llm_formatting(
+                doc_id=request.doc_id,
+                doc_type=request.doc_type,
+                title=request.title
+            )
+        else:
+            document = writer.generate_from_database(
+                doc_id=request.doc_id,
+                doc_type=request.doc_type,
+                title=request.title
+            )
+        
+        # 保存文档
+        output_dir = Path("./output")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        filename = f"data_driven_{request.doc_type}_{uuid.uuid4().hex[:8]}.md"
+        output_path = output_dir / filename
+        
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(document.to_markdown())
+        
+        logger.info(f"Generated document saved to {output_path}")
+        
+        return {
+            "success": True,
+            "title": document.title,
+            "sections_count": len(document.sections),
+            "entity_count": document.entity_count,
+            "relation_count": document.relation_count,
+            "chunk_count": document.chunk_count,
+            "output_path": str(output_path),
+            "download_url": f"/api/generate/download/{filename}",
+            "content": document.to_markdown()
+        }
+    except Exception as e:
+        logger.error(f"Data-driven generation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/generate/preview-data", tags=["Generation"])
+async def preview_database_data(doc_id: Optional[str] = None):
+    """
+    预览数据库中可用于生成文档的数据
+    
+    返回知识图谱中的实体、关系和文档片段统计
+    """
+    components = get_components()
+    
+    from src.generation import DataDrivenWriter
+    
+    try:
+        writer = DataDrivenWriter(
+            graph_store=components.get("graph_store"),
+            vector_store=components.get("vector_store")
+        )
+        
+        entities = writer._get_all_entities()
+        relations = writer._get_all_relations()
+        chunks = writer._get_all_chunks(doc_id)
+        
+        # 按类型统计实体
+        from collections import defaultdict
+        entities_by_type = defaultdict(int)
+        for e in entities:
+            entities_by_type[e.get("type", "unknown")] += 1
+        
+        return {
+            "entity_count": len(entities),
+            "relation_count": len(relations),
+            "chunk_count": len(chunks),
+            "entities_by_type": dict(entities_by_type),
+            "sample_entities": entities[:10],
+            "sample_relations": relations[:10]
+        }
+    except Exception as e:
+        logger.error(f"Preview failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/generate/download/{filename}", tags=["Generation"])
 async def download_document(filename: str):
     """

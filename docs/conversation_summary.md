@@ -929,4 +929,157 @@ for table in tables:
 
 ---
 
-*完整对话记录 - 生成时间: 2026-02-01*
+## 📅 2026年2月2日 更新
+
+### 对话 12: Graph RAG 实现与 Neo4j 集成
+
+**用户：** 对于这个文档 RAG 系统，使用 Graph RAG 有什么优势吗？
+
+**Copilot：** 分析了 Graph RAG 在技术文档场景的优势，包括：
+- 跨文档实体关联（如 MySQL 和 Redis 的依赖关系）
+- 多跳推理能力（A → B → C 的间接依赖）
+- 实体消歧（区分同名但不同上下文的概念）
+- 版本兼容性分析
+
+**用户：** 实现这个推荐的 Graph RAG 集成方案
+
+**Copilot：** 创建了完整的 `src/knowledge_graph/` 模块：
+- `entity_extractor.py` - LLM + 规则混合实体抽取
+- `relation_builder.py` - 语义关系构建
+- `graph_store.py` - 支持内存和 Neo4j 双存储
+- `graph_retriever.py` - 子图检索和路径查找
+- `graph_rag.py` - Graph RAG 与向量检索融合
+- `pipeline.py` - 图谱构建流水线
+
+### 对话 13: Docker 部署与 Neo4j 配置
+
+**用户：** 在 Docker 里面运行，使用 Neo4j
+
+**Copilot：** 更新了 `docker-compose.yml`，添加 Neo4j 服务：
+```yaml
+neo4j:
+  image: neo4j:5.17-community
+  profiles: ["graphrag"]
+  ports:
+    - "7474:7474"  # Web UI
+    - "7687:7687"  # Bolt
+  environment:
+    NEO4J_AUTH: neo4j/graphrag123
+```
+
+启动命令：`docker-compose --profile graphrag up -d`
+
+### 对话 14-16: 性能优化（3轮）
+
+**用户：** 这个过程非常慢，优化这个过程
+
+**Copilot：** 实施了三轮优化：
+
+**第一轮优化：**
+- 批量处理 LLM 请求 (`batch_size=10`)
+- 多线程并行实体抽取 (`ThreadPoolExecutor`)
+- Neo4j 批量写入优化
+
+**第二轮优化：**
+- 增加并行度 (`max_workers=5`)
+- 减少 LLM 调用次数
+- 优化图谱构建流程
+
+**第三轮优化（用户选择 1, 3, 4）：**
+1. ✅ 异步后台处理 - 图谱构建改为后台任务
+2. ❌ 增量更新（未实现）
+3. ✅ 实体抽取缓存 - Pickle 持久化到 `/tmp/entity_cache/`
+4. ✅ 减少关系类型 - 核心关系白名单（DEPENDS_ON, REQUIRES 等）
+
+**结果：** 文档上传从 ~2m43s 优化到 ~14s（图谱后台构建 ~52s）
+
+### 对话 17-18: 数据驱动文档生成
+
+**用户：** 修改代码，根据数据库中的数据，撰写一篇类似的技术文档。如果数据没有在数据库中提供，就不要提及，不可自己生成
+
+**Copilot：** 创建了 `DataDrivenWriter` 模块：
+
+**新增文件：**
+- `src/generation/data_driven_writer.py`
+
+**新增 API 端点：**
+- `POST /api/generate/from-database` - 从数据库生成文档
+- `GET /api/generate/preview-data` - 预览可用数据
+
+**核心功能：**
+- 从 Neo4j 读取所有实体和关系
+- 从 ChromaDB 读取文档 chunks
+- 按实体类型组织文档结构
+- 可选 LLM 格式化（美化输出）
+
+### 对话 19: 文档长度和内容细节控制
+
+**用户：** 如何控制生成文档的长度和内容细节？
+
+**Copilot：** 添加了完整的控制参数：
+
+**细节级别预设 (`detail_level`)：**
+| 级别 | 每类实体数 | 章节数 | 包含描述 | 包含关系 |
+|------|-----------|--------|----------|----------|
+| `brief` | 5 | 5 | ❌ | ❌ |
+| `standard` | 20 | 10 | ✅ | ✅ |
+| `detailed` | 无限 | 无限 | ✅ | ✅ |
+
+**自定义参数：**
+- `max_entities_per_type` - 每种类型最多实体数
+- `max_sections` - 最大章节数
+- `include_relations` - 是否包含关系章节
+- `entity_types` - 指定要包含的实体类型列表
+
+**API 示例：**
+```bash
+# 简略文档
+curl -X POST /api/generate/from-database \
+  -d '{"detail_level": "brief", "max_sections": 3}'
+
+# 只含 API 和错误码
+curl -X POST /api/generate/from-database \
+  -d '{"entity_types": ["api", "error"], "detail_level": "detailed"}'
+```
+
+---
+
+## 代码示例汇总
+
+### Graph RAG 使用
+```python
+from src.knowledge_graph import GraphRAG, Neo4jStore
+
+graph_store = Neo4jStore(uri="bolt://localhost:7687", user="neo4j", password="graphrag123")
+graph_rag = GraphRAG(hybrid_searcher=hybrid_searcher, graph_store=graph_store)
+
+response = graph_rag.smart_query("MySQL 需要什么依赖？")
+print(response.answer)
+print(response.graph_insights)
+```
+
+### 数据驱动文档生成
+```python
+from src.generation import DataDrivenWriter
+
+writer = DataDrivenWriter(
+    graph_store=graph_store,
+    vector_store=vector_store,
+    detail_level="standard",
+    max_entities_per_type=10,
+    entity_types=["api", "config", "error"]
+)
+
+document = writer.generate_with_llm_formatting(
+    doc_type="api_reference",
+    title="SmartHome Pro API 文档"
+)
+
+print(f"实体数: {document.entity_count}")
+print(f"章节数: {len(document.sections)}")
+print(document.to_markdown())
+```
+
+---
+
+*完整对话记录 - 更新时间: 2026-02-02*
