@@ -24,6 +24,9 @@ lxml>=5.1.0          # HTML/XML 解析加速
 chromadb>=0.4.22
 pymilvus>=2.3.0
 
+# Chinese NLP
+jieba>=0.42.1
+
 # Embedding & Reranking
 sentence-transformers>=2.3.0
 FlagEmbedding>=1.2.0

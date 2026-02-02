@@ -320,6 +320,18 @@
             color: #666;
         }
 
+        .reference-item.expanded .ref-content {
+            max-height: 500px !important;
+        }
+
+        .reference-item.expanded .expand-icon {
+            transform: rotate(180deg);
+        }
+
+        .ref-header:hover {
+            background: #ebebeb !important;
+        }
+
         .chat-input-container {
             display: flex;
             gap: 10px;
@@ -900,11 +912,40 @@
                     
                     // Add references if available
                     if (result.references && result.references.length > 0) {
-                        answer += `\n\n<div class="citations"><strong>📚 来源:</strong><br/>`;
-                        result.references.slice(0, 3).forEach((r, i) => {
-                            const source = r.source || r.doc_id || '文档';
-                            const score = r.score ? (r.score * 100).toFixed(0) : 'N/A';
-                            answer += `${i + 1}. ${source} (相关度: ${score}%)<br/>`;
+                        // 去重：根据 content_preview 去重
+                        const seenContent = new Set();
+                        const uniqueRefs = result.references.filter(r => {
+                            const content = r.content_preview || r.chunk_id || '';
+                            if (seenContent.has(content)) {
+                                return false;
+                            }
+                            seenContent.add(content);
+                            return true;
+                        });
+                        
+                        // 重新映射回答中的引用标记，根据去重后的数量调整
+                        const refCount = Math.min(uniqueRefs.length, 5);
+                        // 移除多余的引用标记（如果去重后只有3个，就移除[来源 4][来源 5]等）
+                        for (let i = refCount + 1; i <= 10; i++) {
+                            answer = answer.replace(new RegExp(`\\[来源\\s*${i}\\]`, 'g'), '');
+                        }
+                        
+                        answer += `\n\n<div class="citations"><strong>📚 参考来源 (${refCount}):</strong> <span style="font-size: 0.8rem; color: #888;">(点击展开详情)</span>`;
+                        uniqueRefs.slice(0, 5).forEach((r, i) => {
+                            const docTitle = r.doc_title || r.source || '文档';
+                            const section = r.section_title || '';
+                            const page = r.page ? `第${r.page}页` : '';
+                            const preview = r.content_preview || '';
+                            const chunkId = r.chunk_id || '';
+                            
+                            answer += `<div class="reference-item" style="margin: 10px 0; border-radius: 8px; border: 1px solid #e0e0e0; overflow: hidden;">`;
+                            answer += `<div class="ref-header" onclick="this.parentElement.classList.toggle('expanded')" style="padding: 12px; background: #f5f5f5; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid #667eea;">`;
+                            answer += `<div><span style="font-weight: 600; color: #333;">📄 ${i + 1}. ${docTitle}</span>`;
+                            if (section) answer += `<span style="font-size: 0.85rem; color: #666; margin-left: 10px;">📑 ${section} ${page}</span>`;
+                            answer += `</div><span class="expand-icon" style="transition: transform 0.3s;">▼</span></div>`;
+                            answer += `<div class="ref-content" style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; background: #fafafa;">`;
+                            answer += `<div style="padding: 15px; font-size: 0.9rem; color: #444; line-height: 1.6; white-space: pre-wrap; font-family: monospace;">${preview.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
+                            answer += `</div></div>`;
                         });
                         answer += '</div>';
                     }

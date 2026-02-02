@@ -115,9 +115,9 @@ class ChunkingSettings(BaseSettings):
 
 class RetrievalSettings(BaseSettings):
     """检索配置"""
-    # 混合检索权重
-    vector_weight: float = 0.6
-    bm25_weight: float = 0.4
+    # 混合检索权重 - 增加 BM25 权重以提升中文关键词匹配
+    vector_weight: float = 0.4
+    bm25_weight: float = 0.6
     
     # 检索数量
     initial_top_k: int = 30  # 初始召回数量

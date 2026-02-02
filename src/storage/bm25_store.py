@@ -80,12 +80,24 @@ class MemoryBM25Store(BM25Store):
     def _tokenize(self, text: str) -> List[str]:
         """
         分词
-        支持中英文混合
+        支持中英文混合，使用 jieba 进行中文分词
         """
-        # 简单的分词实现
-        # 英文: 按空格和标点分割
-        # 中文: 按字符分割
-        
+        try:
+            import jieba
+            # 使用 jieba 精确模式分词
+            tokens = list(jieba.cut(text.lower(), cut_all=False))
+            # 过滤空白和标点
+            tokens = [t.strip() for t in tokens if t.strip() and len(t.strip()) > 0]
+            return tokens
+        except ImportError:
+            # 降级到 n-gram 方式
+            logger.warning("jieba not installed, falling back to n-gram tokenization")
+            return self._tokenize_ngram(text)
+    
+    def _tokenize_ngram(self, text: str) -> List[str]:
+        """
+        N-gram 分词（备用方案）
+        """
         tokens = []
         
         # 分离中英文
@@ -93,14 +105,19 @@ class MemoryBM25Store(BM25Store):
         
         for seg in segments:
             if re.match(r'^[\u4e00-\u9fff]+$', seg):
-                # 中文按字符分割
+                # 中文使用 n-gram
                 tokens.extend(list(seg))
+                if len(seg) >= 2:
+                    for i in range(len(seg) - 1):
+                        tokens.append(seg[i:i+2])
+                if len(seg) >= 3:
+                    for i in range(len(seg) - 2):
+                        tokens.append(seg[i:i+3])
             else:
-                # 英文保持原样
                 tokens.append(seg)
         
         return tokens
-    
+
     def add(
         self,
         ids: List[str],

@@ -1165,6 +1165,56 @@ async def export_to_pdf(content: str = Form(""), title: str = Form("技术文档
 
 # ==================== 知识库管理接口 ====================
 
+@app.post("/api/kb/sync-bm25", tags=["Knowledge Base"])
+async def sync_bm25_index():
+    """
+    从向量存储同步 BM25 索引
+    
+    当 BM25 索引丢失或需要重建时使用
+    """
+    components = get_components()
+    vector_store = components["vector_store"]
+    bm25_store = components["bm25_store"]
+    
+    if not vector_store or not bm25_store:
+        raise HTTPException(status_code=500, detail="存储组件未初始化")
+    
+    try:
+        # 获取向量存储中的所有文档
+        all_chunks = vector_store.get_all_chunks()
+        
+        if not all_chunks:
+            return {"status": "success", "message": "向量存储为空，无需同步", "count": 0}
+        
+        # 添加到 BM25
+        ids = []
+        contents = []
+        metadatas = []
+        
+        for c in all_chunks:
+            chunk_id = c.pop("chunk_id", "")
+            content = c.pop("content", "")
+            # 剩余字段作为 metadata
+            metadata = c  # 其余字段都是 metadata
+            
+            ids.append(chunk_id)
+            contents.append(content)
+            metadatas.append(metadata)
+        
+        bm25_store.add(ids, contents, metadatas)
+        
+        logger.info(f"Synced {len(all_chunks)} chunks to BM25 index")
+        
+        return {
+            "status": "success",
+            "message": f"成功同步 {len(all_chunks)} 个文档到 BM25 索引",
+            "count": len(all_chunks)
+        }
+    except Exception as e:
+        logger.error(f"BM25 sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/kb/stats", tags=["Knowledge Base"])
 async def get_kb_stats():
     """
