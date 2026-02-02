@@ -1,0 +1,70 @@
+# Core Framework
+fastapi>=0.109.0
+uvicorn>=0.27.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-multipart>=0.0.6
+
+# PDF Processing
+pymupdf>=1.23.0
+pdfplumber>=0.10.0
+unstructured[pdf]>=0.12.0
+pdf2image>=1.16.0
+pytesseract>=0.3.10
+
+# OCR Processing (扫描版 PDF)
+paddlepaddle>=2.6.0  # PaddleOCR 基础框架
+paddleocr>=2.7.0     # PaddleOCR 主库 (高精度中英文识别)
+opencv-python>=4.9.0 # 图像预处理
+beautifulsoup4>=4.12.0  # 表格 HTML 解析
+lxml>=5.1.0          # HTML/XML 解析加速
+# azure-ai-formrecognizer>=3.3.0  # 可选: Azure Document Intelligence (需取消注释)
+
+# Vector Store
+chromadb>=0.4.22
+pymilvus>=2.3.0
+
+# Embedding & Reranking
+sentence-transformers>=2.3.0
+FlagEmbedding>=1.2.0
+
+# Multimodal (图片处理)
+Pillow>=10.2.0           # 图片处理基础库
+transformers>=4.38.0     # CLIP 模型
+torch>=2.2.0             # PyTorch (CLIP 推理)
+
+# BM25 Search
+rank-bm25>=0.2.2
+elasticsearch>=8.12.0
+
+# LLM Clients
+openai>=1.12.0
+anthropic>=0.18.0
+google-generativeai>=0.4.0
+
+# Document Generation
+python-docx>=1.1.0
+markdown>=3.5.0
+jinja2>=3.1.0
+
+# Data Processing
+pandas>=2.2.0
+numpy>=1.26.0
+tiktoken>=0.6.0
+
+# Evaluation
+ragas>=0.1.0
+datasets>=2.17.0
+
+# Utilities
+loguru>=0.7.0
+python-dotenv>=1.0.0
+tenacity>=8.2.0
+aiohttp>=3.9.0
+httpx>=0.26.0
+tqdm>=4.66.0
+rich>=13.7.0
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
