@@ -2,9 +2,10 @@
 FastAPI 服务
 提供 RESTful API 接口
 """
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from pathlib import Path
@@ -139,6 +140,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files
+static_path = Path(__file__).parent.parent.parent / "static"
+if static_path.exists():
+    app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+
+
+# Root route - serve the web UI
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def root():
+    """Serve the main web UI"""
+    index_path = static_path / "index.html"
+    if index_path.exists():
+        return HTMLResponse(content=index_path.read_text(encoding="utf-8"))
+    return HTMLResponse(content="<h1>RAG 技术文档系统</h1><p>访问 <a href='/docs'>/docs</a> 查看 API 文档</p>")
+
 
 # ==================== 全局变量 (懒加载) ====================
 
@@ -363,7 +380,8 @@ async def upload_and_ingest(
     version: Optional[str] = None,
     doc_type: Optional[str] = None,
     build_graph: bool = True,
-    async_graph: bool = True  # 新参数：是否异步构建图谱
+    async_graph: bool = True,  # 是否异步构建图谱
+    use_neo4j: bool = True     # 是否使用 Neo4j (否则使用内存存储)
 ):
     """
     上传并摄取文档
@@ -375,6 +393,7 @@ async def upload_and_ingest(
         doc_type: 文档类型
         build_graph: 是否构建知识图谱 (默认 True)
         async_graph: 是否异步构建图谱 (默认 True，立即返回)
+        use_neo4j: 是否使用 Neo4j 存储图谱 (默认 True，否则使用内存存储)
     """
     components = get_components()
     pipeline = components["ingestion_pipeline"]
@@ -411,17 +430,19 @@ async def upload_and_ingest(
                     "completed_at": None,
                     "entities": 0,
                     "relations": 0,
-                    "error": None
+                    "error": None,
+                    "use_neo4j": use_neo4j
                 }
                 background_tasks.add_task(
                     _build_knowledge_graph_background,
                     stats.doc_id,
-                    components
+                    components,
+                    use_neo4j
                 )
                 graph_stats = {"status": "building", "task_id": stats.doc_id}
             else:
                 # 同步构建
-                graph_stats = await _build_knowledge_graph(stats.doc_id, components)
+                graph_stats = await _build_knowledge_graph(stats.doc_id, components, use_neo4j)
         
         return {
             "success": True,
@@ -459,7 +480,7 @@ async def list_graph_build_tasks():
     return {"tasks": _graph_build_tasks}
 
 
-def _build_knowledge_graph_background(doc_id: str, components: dict):
+def _build_knowledge_graph_background(doc_id: str, components: dict, use_neo4j: bool = True):
     """后台构建知识图谱"""
     _graph_build_tasks[doc_id]["status"] = "running"
     
@@ -467,7 +488,7 @@ def _build_knowledge_graph_background(doc_id: str, components: dict):
         import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(_build_knowledge_graph(doc_id, components))
+        result = loop.run_until_complete(_build_knowledge_graph(doc_id, components, use_neo4j))
         loop.close()
         
         _graph_build_tasks[doc_id]["status"] = "completed"
@@ -484,9 +505,14 @@ def _build_knowledge_graph_background(doc_id: str, components: dict):
         logger.error(f"Background graph build failed for {doc_id}: {e}")
 
 
-async def _build_knowledge_graph(doc_id: str, components: dict) -> dict:
+async def _build_knowledge_graph(doc_id: str, components: dict, use_neo4j: bool = True) -> dict:
     """
     为文档构建知识图谱（优化版）
+    
+    Args:
+        doc_id: 文档 ID
+        components: 组件字典
+        use_neo4j: 是否使用 Neo4j (否则使用内存存储)
     
     优化:
     1. 使用批量实体抽取（更大批次）
@@ -498,7 +524,16 @@ async def _build_knowledge_graph(doc_id: str, components: dict) -> dict:
         vector_store = components["vector_store"]
         entity_extractor = components["entity_extractor"]
         relation_builder = components["relation_builder"]
-        graph_store = components["graph_store"]
+        
+        # 根据选项选择图存储
+        if use_neo4j and components.get("graph_store"):
+            graph_store = components["graph_store"]
+            logger.info(f"Using Neo4j graph store for {doc_id}")
+        else:
+            # 使用内存存储
+            from src.knowledge_graph import InMemoryGraphStore
+            graph_store = InMemoryGraphStore(persist_path=f"./data/graph_{doc_id}.json")
+            logger.info(f"Using in-memory graph store for {doc_id}")
         
         # 获取该文档的所有 chunks
         all_chunks = vector_store.get_all_chunks(filter_dict={"doc_id": doc_id})
@@ -884,6 +919,248 @@ async def download_document(filename: str):
         filename=filename,
         media_type="application/octet-stream"
     )
+
+
+@app.post("/api/generate/export/docx", tags=["Generation"])
+async def export_to_docx(content: str = Form(""), title: str = Form("技术文档")):
+    """
+    将 Markdown 内容导出为 DOCX 文件
+    
+    Args:
+        content: Markdown 格式的文档内容
+        title: 文档标题
+    
+    Returns:
+        DOCX 文件下载
+    """
+    logger.info(f"Exporting DOCX, content length: {len(content)}, title: {title}")
+    from docx import Document
+    from docx.shared import Pt, Inches
+    from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+    import re
+    
+    try:
+        doc = Document()
+        
+        # 设置文档标题
+        title_para = doc.add_heading(title, 0)
+        title_para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        
+        # 解析 Markdown 内容并转换为 DOCX
+        lines = content.split('\n')
+        current_list = None
+        
+        for line in lines:
+            line = line.rstrip()
+            
+            # 跳过空行
+            if not line:
+                continue
+            
+            # 处理标题
+            if line.startswith('# '):
+                doc.add_heading(line[2:], 1)
+                current_list = None
+            elif line.startswith('## '):
+                doc.add_heading(line[3:], 2)
+                current_list = None
+            elif line.startswith('### '):
+                doc.add_heading(line[4:], 3)
+                current_list = None
+            elif line.startswith('#### '):
+                doc.add_heading(line[5:], 4)
+                current_list = None
+            # 处理列表项
+            elif line.startswith('- ') or line.startswith('* '):
+                text = line[2:]
+                para = doc.add_paragraph(text, style='List Bullet')
+            elif re.match(r'^\d+\.\s', line):
+                text = re.sub(r'^\d+\.\s', '', line)
+                para = doc.add_paragraph(text, style='List Number')
+            # 处理代码块
+            elif line.startswith('```'):
+                continue  # 跳过代码块标记
+            # 处理普通文本
+            else:
+                # 处理粗体和斜体
+                text = line
+                text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # 移除粗体标记
+                text = re.sub(r'\*(.+?)\*', r'\1', text)  # 移除斜体标记
+                text = re.sub(r'`(.+?)`', r'\1', text)  # 移除行内代码标记
+                
+                if text.strip():
+                    doc.add_paragraph(text)
+        
+        # 保存到临时文件
+        output_dir = Path("./output")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        safe_title = re.sub(r'[^\w\-_\u4e00-\u9fff]', '_', title)[:50]
+        filename = f"{safe_title}_{uuid.uuid4().hex[:8]}.docx"
+        file_path = output_dir / filename
+        
+        doc.save(str(file_path))
+        
+        logger.info(f"Exported DOCX to {file_path}")
+        
+        return FileResponse(
+            path=str(file_path),
+            filename=filename,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+    except Exception as e:
+        logger.error(f"DOCX export failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/generate/export/pdf", tags=["Generation"])
+async def export_to_pdf(content: str = Form(""), title: str = Form("技术文档")):
+    """
+    将 Markdown 内容导出为 PDF 文件
+    
+    Args:
+        content: Markdown 格式的文档内容
+        title: 文档标题
+    
+    Returns:
+        PDF 文件下载
+    """
+    logger.info(f"Exporting PDF, content length: {len(content)}, title: {title}")
+    import markdown2
+    from weasyprint import HTML, CSS
+    import re
+    
+    try:
+        # 将 Markdown 转换为 HTML
+        html_content = markdown2.markdown(
+            content, 
+            extras=['fenced-code-blocks', 'tables', 'header-ids']
+        )
+        
+        # 创建完整的 HTML 文档，带有中文字体支持
+        full_html = f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>{title}</title>
+    <style>
+        @page {{
+            size: A4;
+            margin: 2cm;
+        }}
+        body {{
+            font-family: "Noto Sans CJK SC", "WenQuanYi Micro Hei", "Microsoft YaHei", sans-serif;
+            font-size: 11pt;
+            line-height: 1.6;
+            color: #333;
+        }}
+        h1 {{
+            font-size: 24pt;
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+            margin-top: 30px;
+        }}
+        h2 {{
+            font-size: 18pt;
+            color: #34495e;
+            margin-top: 25px;
+        }}
+        h3 {{
+            font-size: 14pt;
+            color: #5d6d7e;
+            margin-top: 20px;
+        }}
+        h4 {{
+            font-size: 12pt;
+            color: #7f8c8d;
+            margin-top: 15px;
+        }}
+        p {{
+            margin: 10px 0;
+            text-align: justify;
+        }}
+        ul, ol {{
+            margin: 10px 0;
+            padding-left: 30px;
+        }}
+        li {{
+            margin: 5px 0;
+        }}
+        code {{
+            background-color: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: "Consolas", "Monaco", monospace;
+            font-size: 10pt;
+        }}
+        pre {{
+            background-color: #f4f4f4;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-size: 10pt;
+        }}
+        pre code {{
+            background: none;
+            padding: 0;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }}
+        th, td {{
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }}
+        th {{
+            background-color: #3498db;
+            color: white;
+        }}
+        tr:nth-child(even) {{
+            background-color: #f9f9f9;
+        }}
+        blockquote {{
+            border-left: 4px solid #3498db;
+            margin: 15px 0;
+            padding: 10px 20px;
+            background-color: #f9f9f9;
+        }}
+    </style>
+</head>
+<body>
+    <h1 style="text-align: center; border-bottom: none;">{title}</h1>
+    {html_content}
+</body>
+</html>'''
+        
+        # 保存到临时文件
+        output_dir = Path("./output")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        safe_title = re.sub(r'[^\w\-_\u4e00-\u9fff]', '_', title)[:50]
+        filename = f"{safe_title}_{uuid.uuid4().hex[:8]}.pdf"
+        file_path = output_dir / filename
+        
+        # 生成 PDF
+        HTML(string=full_html).write_pdf(str(file_path))
+        
+        logger.info(f"Exported PDF to {file_path}")
+        
+        return FileResponse(
+            path=str(file_path),
+            filename=filename,
+            media_type="application/pdf"
+        )
+    except Exception as e:
+        logger.error(f"PDF export failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================== 知识库管理接口 ====================

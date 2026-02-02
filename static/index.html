@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG 技术文档系统</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 15px 20px;
+            border: none;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .tab-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .tab-btn.active {
+            background: white;
+            color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        /* Upload Section */
+        .upload-zone {
+            border: 3px dashed #ddd;
+            border-radius: 15px;
+            padding: 50px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 20px;
+        }
+
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .upload-zone i {
+            font-size: 3rem;
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .upload-zone p {
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .upload-zone .formats {
+            font-size: 0.85rem;
+            color: #999;
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        .metadata-form {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .form-group label {
+            font-size: 0.9rem;
+            color: #555;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+
+        .form-group input, .form-group select {
+            padding: 12px 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        /* Graph Options Radio Buttons */
+        .graph-options {
+            margin-bottom: 20px;
+            padding: 15px 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .options-label {
+            display: block;
+            font-size: 0.9rem;
+            color: #555;
+            margin-bottom: 12px;
+            font-weight: 500;
+        }
+
+        .radio-group {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .radio-label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            padding: 8px 12px;
+            border-radius: 8px;
+            transition: background 0.2s;
+        }
+
+        .radio-label:hover {
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .radio-label input[type="radio"] {
+            display: none;
+        }
+
+        .radio-custom {
+            width: 18px;
+            height: 18px;
+            border: 2px solid #ccc;
+            border-radius: 50%;
+            margin-right: 8px;
+            position: relative;
+            transition: all 0.2s;
+        }
+
+        .radio-label input[type="radio"]:checked + .radio-custom {
+            border-color: #667eea;
+        }
+
+        .radio-label input[type="radio"]:checked + .radio-custom::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 10px;
+            height: 10px;
+            background: #667eea;
+            border-radius: 50%;
+        }
+
+        .radio-text {
+            font-size: 0.95rem;
+            color: #333;
+        }
+
+        .radio-text small {
+            color: #888;
+            font-size: 0.8rem;
+        }
+
+        .btn {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Query Section */
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 500px;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            margin-bottom: 15px;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message.user {
+            align-items: flex-end;
+        }
+
+        .message.assistant {
+            align-items: flex-start;
+        }
+
+        .message-bubble {
+            max-width: 80%;
+            padding: 12px 18px;
+            border-radius: 15px;
+            line-height: 1.5;
+        }
+
+        .message.user .message-bubble {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 5px;
+        }
+
+        .message.assistant .message-bubble {
+            background: white;
+            color: #333;
+            border-bottom-left-radius: 5px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .message-label {
+            font-size: 0.75rem;
+            color: #999;
+            margin-bottom: 5px;
+        }
+
+        .citations {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #eee;
+            font-size: 0.85rem;
+            color: #666;
+        }
+
+        .chat-input-container {
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input-container input {
+            flex: 1;
+            padding: 15px 20px;
+            border: 2px solid #ddd;
+            border-radius: 25px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+
+        .chat-input-container input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .chat-input-container button {
+            padding: 15px 30px;
+            border-radius: 25px;
+        }
+
+        /* Generate Section */
+        .generate-options {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+
+        .option-card {
+            padding: 20px;
+            border: 2px solid #eee;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .option-card:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .option-card.selected {
+            border-color: #667eea;
+            background: #f0f3ff;
+        }
+
+        .option-card h4 {
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .option-card p {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .generate-settings {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .output-area {
+            margin-top: 20px;
+        }
+
+        .output-area h4 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .output-content {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 10px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.9rem;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        /* Status Messages */
+        .status {
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .status.success {
+            display: block;
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            display: block;
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.loading {
+            display: block;
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* File List */
+        .file-list {
+            margin-top: 15px;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+
+        .file-item .file-name {
+            font-weight: 500;
+            color: #333;
+        }
+
+        .file-item .file-size {
+            color: #666;
+            font-size: 0.85rem;
+        }
+
+        .file-item .remove-btn {
+            color: #dc3545;
+            cursor: pointer;
+            padding: 5px 10px;
+        }
+
+        /* Stats Display */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: bold;
+        }
+
+        .stat-card .label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        @media (max-width: 768px) {
+            .tabs {
+                flex-direction: column;
+            }
+            
+            .metadata-form, .generate-options, .generate-settings, .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📚 RAG 技术文档系统</h1>
+            <p>智能文档处理 · RAG 问答 · 文档生成</p>
+        </header>
+
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="upload">📤 上传文档</button>
+            <button class="tab-btn" data-tab="query">💬 智能问答</button>
+            <button class="tab-btn" data-tab="generate">📝 文档生成</button>
+        </div>
+
+        <!-- Upload Tab -->
+        <div id="upload" class="tab-content active">
+            <h2 class="section-title">上传技术文档</h2>
+            
+            <div class="upload-zone" id="drop-zone">
+                <div style="font-size: 3rem; margin-bottom: 15px;">📄</div>
+                <p><strong>拖拽文件到此处</strong> 或 <span style="color: #667eea; cursor: pointer;">点击选择文件</span></p>
+                <p class="formats">支持格式: PDF (文字版/扫描版)</p>
+            </div>
+            <input type="file" id="file-input" accept=".pdf" />
+
+            <div class="file-list" id="file-list"></div>
+
+            <div class="metadata-form">
+                <div class="form-group">
+                    <label>产品名称</label>
+                    <input type="text" id="product" placeholder="如: SmartHome Pro" />
+                </div>
+                <div class="form-group">
+                    <label>版本号</label>
+                    <input type="text" id="version" placeholder="如: v2.5.0" />
+                </div>
+                <div class="form-group">
+                    <label>文档类型</label>
+                    <select id="doc-type">
+                        <option value="user_manual">用户手册</option>
+                        <option value="api_reference">API 参考</option>
+                        <option value="installation_guide">安装指南</option>
+                        <option value="troubleshooting">故障排除</option>
+                        <option value="release_notes">发布说明</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="graph-options">
+                <label class="options-label">知识图谱构建</label>
+                <div class="radio-group">
+                    <label class="radio-label">
+                        <input type="radio" name="graph-store" value="none" checked />
+                        <span class="radio-custom"></span>
+                        <span class="radio-text">⚡ 仅向量检索 <small>(默认，最快)</small></span>
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" name="graph-store" value="neo4j" />
+                        <span class="radio-custom"></span>
+                        <span class="radio-text">🔷 Neo4j 图谱 <small>(推荐，支持图查询)</small></span>
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" name="graph-store" value="memory" />
+                        <span class="radio-custom"></span>
+                        <span class="radio-text">💾 内存图谱 <small>(轻量，重启后丢失)</small></span>
+                    </label>
+                </div>
+            </div>
+
+            <button class="btn btn-primary" id="upload-btn" disabled>
+                📤 开始上传并处理
+            </button>
+
+            <div id="upload-status" class="status"></div>
+
+            <div class="stats-grid" id="upload-stats" style="display: none;">
+                <div class="stat-card">
+                    <div class="value" id="stat-chunks">0</div>
+                    <div class="label">文档片段</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="stat-entities">0</div>
+                    <div class="label">实体数量</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="stat-relations">0</div>
+                    <div class="label">关系数量</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="stat-time">0s</div>
+                    <div class="label">处理时间</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Query Tab -->
+        <div id="query" class="tab-content">
+            <h2 class="section-title">智能问答 (RAG)</h2>
+            
+            <div class="chat-container">
+                <div class="chat-messages" id="chat-messages">
+                    <div class="message assistant">
+                        <span class="message-label">AI 助手</span>
+                        <div class="message-bubble">
+                            您好！我是技术文档 RAG 助手。请输入您的问题，我会基于已上传的文档为您提供准确答案。
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="chat-input-container">
+                    <input type="text" id="chat-input" placeholder="输入您的问题..." />
+                    <button class="btn btn-primary" id="send-btn">发送</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Generate Tab -->
+        <div id="generate" class="tab-content">
+            <h2 class="section-title">数据驱动文档生成</h2>
+            
+            <p style="color: #666; margin-bottom: 20px;">
+                基于知识图谱和向量存储中的数据生成技术文档，严格使用已有数据，不编造内容。
+            </p>
+
+            <h4 style="margin-bottom: 15px;">选择文档类型</h4>
+            <div class="generate-options">
+                <div class="option-card selected" data-type="api_reference">
+                    <h4>📖 API 参考文档</h4>
+                    <p>包含 API 接口、配置项、错误码等</p>
+                </div>
+                <div class="option-card" data-type="user_manual">
+                    <h4>📘 用户手册</h4>
+                    <p>包含产品功能、操作指南、配置说明</p>
+                </div>
+                <div class="option-card" data-type="installation_guide">
+                    <h4>🔧 安装指南</h4>
+                    <p>包含依赖、配置、命令等</p>
+                </div>
+                <div class="option-card" data-type="general">
+                    <h4>📋 通用文档</h4>
+                    <p>包含所有类型的实体信息</p>
+                </div>
+            </div>
+
+            <h4 style="margin-bottom: 15px;">生成设置</h4>
+            <div class="generate-settings">
+                <div class="form-group">
+                    <label>文档标题</label>
+                    <input type="text" id="gen-title" placeholder="自动生成或输入自定义标题" />
+                </div>
+                <div class="form-group">
+                    <label>细节级别</label>
+                    <select id="gen-detail">
+                        <option value="brief">简略 (Brief)</option>
+                        <option value="standard" selected>标准 (Standard)</option>
+                        <option value="detailed">详细 (Detailed)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>最大章节数</label>
+                    <input type="number" id="gen-sections" value="10" min="1" max="50" />
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 10px;">
+                <button class="btn btn-primary" id="generate-btn">🚀 生成文档</button>
+                <button class="btn btn-primary" id="preview-btn" style="background: #28a745;">📊 预览数据</button>
+            </div>
+
+            <div id="generate-status" class="status"></div>
+
+            <div class="output-area" id="output-area" style="display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h4>📄 生成结果</h4>
+                    <div class="download-buttons" id="download-buttons" style="display: flex; gap: 10px;">
+                        <button class="btn" id="download-md" style="background: #6c757d; padding: 8px 15px; font-size: 0.9rem;">
+                            📝 Markdown
+                        </button>
+                        <button class="btn" id="download-docx" style="background: #2b579a; padding: 8px 15px; font-size: 0.9rem;">
+                            📘 Word (.docx)
+                        </button>
+                        <button class="btn" id="download-pdf" style="background: #d9534f; padding: 8px 15px; font-size: 0.9rem;">
+                            📕 PDF
+                        </button>
+                    </div>
+                </div>
+                <div class="output-content" id="output-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';  // Same origin
+
+        // Tab switching
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById(btn.dataset.tab).classList.add('active');
+            });
+        });
+
+        // ============ Upload Tab ============
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const uploadBtn = document.getElementById('upload-btn');
+        const fileList = document.getElementById('file-list');
+        let selectedFile = null;
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function handleFile(file) {
+            if (!file.name.endsWith('.pdf')) {
+                showStatus('upload-status', '请选择 PDF 文件', 'error');
+                return;
+            }
+            selectedFile = file;
+            fileList.innerHTML = `
+                <div class="file-item">
+                    <span class="file-name">📄 ${file.name}</span>
+                    <span class="file-size">${(file.size / 1024 / 1024).toFixed(2)} MB</span>
+                    <span class="remove-btn" onclick="removeFile()">✕</span>
+                </div>
+            `;
+            uploadBtn.disabled = false;
+        }
+
+        function removeFile() {
+            selectedFile = null;
+            fileList.innerHTML = '';
+            uploadBtn.disabled = true;
+            fileInput.value = '';
+        }
+
+        uploadBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            // Get selected graph store option
+            const graphStoreOption = document.querySelector('input[name="graph-store"]:checked').value;
+            const buildGraph = graphStoreOption !== 'none';
+            const useNeo4j = graphStoreOption === 'neo4j';
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            formData.append('product', document.getElementById('product').value || 'Unknown');
+            formData.append('version', document.getElementById('version').value || '1.0.0');
+            formData.append('doc_type', document.getElementById('doc-type').value);
+            formData.append('build_graph', buildGraph);
+            formData.append('use_neo4j', useNeo4j);
+
+            uploadBtn.disabled = true;
+            const graphMsg = buildGraph ? (useNeo4j ? '(Neo4j图谱)' : '(内存图谱)') : '(无图谱)';
+            showStatus('upload-status', `<span class="spinner"></span> 正在上传并处理文档 ${graphMsg}，请稍候...`, 'loading');
+            
+            const startTime = Date.now();
+
+            try {
+                const response = await fetch(`${API_BASE}/api/ingest/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+                if (response.ok) {
+                    // Show stats immediately
+                    document.getElementById('upload-stats').style.display = 'grid';
+                    
+                    // Get chunks from nested stats object
+                    const stats = result.stats || {};
+                    const childChunks = stats.child_chunks || result.child_chunks || 0;
+                    document.getElementById('stat-chunks').textContent = childChunks;
+                    document.getElementById('stat-time').textContent = elapsed + 's';
+                    
+                    // Handle graph stats based on option selected
+                    if (!buildGraph) {
+                        document.getElementById('stat-entities').textContent = '未启用';
+                        document.getElementById('stat-relations').textContent = '未启用';
+                        showStatus('upload-status', `✅ 文档处理完成！文档ID: ${result.doc_id} (未构建图谱)`, 'success');
+                    } else {
+                        // Check if graph is being built asynchronously
+                        const graphStats = result.graph_stats;
+                        if (graphStats && graphStats.status === 'building') {
+                            showStatus('upload-status', `✅ 文档处理完成！文档ID: ${result.doc_id}<br/><span class="spinner"></span> 知识图谱正在后台构建...`, 'success');
+                            document.getElementById('stat-entities').textContent = '构建中...';
+                            document.getElementById('stat-relations').textContent = '构建中...';
+                            
+                            // Poll for graph build status
+                            pollGraphStatus(result.doc_id);
+                        } else if (graphStats) {
+                            // Sync graph build completed
+                            document.getElementById('stat-entities').textContent = graphStats.entities || 0;
+                            document.getElementById('stat-relations').textContent = graphStats.relations || 0;
+                            showStatus('upload-status', `✅ 文档处理完成！文档ID: ${result.doc_id}`, 'success');
+                        } else {
+                            document.getElementById('stat-entities').textContent = '未启用';
+                            document.getElementById('stat-relations').textContent = '未启用';
+                            showStatus('upload-status', `✅ 文档处理完成！文档ID: ${result.doc_id}`, 'success');
+                        }
+                    }
+                } else {
+                    showStatus('upload-status', `❌ 上传失败: ${result.detail || '未知错误'}`, 'error');
+                }
+            } catch (error) {
+                showStatus('upload-status', `❌ 网络错误: ${error.message}`, 'error');
+            }
+
+            uploadBtn.disabled = false;
+        });
+
+        // ============ Query Tab ============
+        const chatMessages = document.getElementById('chat-messages');
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-btn');
+
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendBtn.click();
+        });
+
+        sendBtn.addEventListener('click', async () => {
+            const query = chatInput.value.trim();
+            if (!query) return;
+
+            // Add user message
+            addMessage(query, 'user');
+            chatInput.value = '';
+            sendBtn.disabled = true;
+
+            // Add loading message
+            const loadingId = addMessage('<span class="spinner"></span> 思考中...', 'assistant', true);
+
+            try {
+                const response = await fetch(`${API_BASE}/api/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: query, top_k: 5 })
+                });
+
+                const result = await response.json();
+                
+                // Remove loading message
+                document.getElementById(loadingId)?.remove();
+
+                if (response.ok) {
+                    let answer = result.answer || '抱歉，我无法找到相关答案。';
+                    
+                    // Add references if available
+                    if (result.references && result.references.length > 0) {
+                        answer += `\n\n<div class="citations"><strong>📚 来源:</strong><br/>`;
+                        result.references.slice(0, 3).forEach((r, i) => {
+                            const source = r.source || r.doc_id || '文档';
+                            const score = r.score ? (r.score * 100).toFixed(0) : 'N/A';
+                            answer += `${i + 1}. ${source} (相关度: ${score}%)<br/>`;
+                        });
+                        answer += '</div>';
+                    }
+                    
+                    addMessage(answer, 'assistant');
+                } else {
+                    addMessage(`❌ 错误: ${result.detail || '查询失败'}`, 'assistant');
+                }
+            } catch (error) {
+                document.getElementById(loadingId)?.remove();
+                addMessage(`❌ 网络错误: ${error.message}`, 'assistant');
+            }
+
+            sendBtn.disabled = false;
+        });
+
+        function addMessage(content, type, isLoading = false) {
+            const id = 'msg-' + Date.now();
+            const div = document.createElement('div');
+            div.className = `message ${type}`;
+            div.id = id;
+            div.innerHTML = `
+                <span class="message-label">${type === 'user' ? '您' : 'AI 助手'}</span>
+                <div class="message-bubble">${content}</div>
+            `;
+            chatMessages.appendChild(div);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return id;
+        }
+
+        // ============ Generate Tab ============
+        document.querySelectorAll('.option-card').forEach(card => {
+            card.addEventListener('click', () => {
+                document.querySelectorAll('.option-card').forEach(c => c.classList.remove('selected'));
+                card.classList.add('selected');
+            });
+        });
+
+        document.getElementById('preview-btn').addEventListener('click', async () => {
+            showStatus('generate-status', '<span class="spinner"></span> 正在获取数据统计...', 'loading');
+
+            try {
+                const response = await fetch(`${API_BASE}/api/generate/preview-data`);
+                const result = await response.json();
+
+                if (response.ok) {
+                    let info = `📊 数据库统计:\n`;
+                    info += `• 实体数量: ${result.entity_count}\n`;
+                    info += `• 关系数量: ${result.relation_count}\n`;
+                    info += `• 文档片段: ${result.chunk_count}\n\n`;
+                    info += `实体类型分布:\n`;
+                    for (const [type, count] of Object.entries(result.entities_by_type || {})) {
+                        info += `  - ${type}: ${count}\n`;
+                    }
+                    
+                    document.getElementById('output-area').style.display = 'block';
+                    document.getElementById('output-content').textContent = info;
+                    showStatus('generate-status', '✅ 数据预览成功', 'success');
+                } else {
+                    showStatus('generate-status', `❌ 预览失败: ${result.detail}`, 'error');
+                }
+            } catch (error) {
+                showStatus('generate-status', `❌ 网络错误: ${error.message}`, 'error');
+            }
+        });
+
+        // Store generated content for downloads
+        let generatedContent = '';
+        let generatedTitle = '';
+
+        document.getElementById('generate-btn').addEventListener('click', async () => {
+            const docType = document.querySelector('.option-card.selected')?.dataset.type || 'api_reference';
+            const title = document.getElementById('gen-title').value;
+            const detailLevel = document.getElementById('gen-detail').value;
+            const maxSections = parseInt(document.getElementById('gen-sections').value) || 10;
+
+            showStatus('generate-status', '<span class="spinner"></span> 正在生成文档，请稍候...', 'loading');
+            document.getElementById('generate-btn').disabled = true;
+            document.getElementById('download-buttons').style.display = 'none';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/generate/from-database`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        doc_type: docType,
+                        title: title || null,
+                        detail_level: detailLevel,
+                        max_sections: maxSections,
+                        use_llm_formatting: true
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showStatus('generate-status', `✅ 文档生成成功！章节数: ${result.sections_count}, 实体: ${result.entity_count}`, 'success');
+                    document.getElementById('output-area').style.display = 'block';
+                    document.getElementById('output-content').textContent = result.content || '无内容';
+                    
+                    // Store for downloads
+                    generatedContent = result.content || '';
+                    generatedTitle = result.title || title || '技术文档';
+                    document.getElementById('download-buttons').style.display = 'flex';
+                } else {
+                    showStatus('generate-status', `❌ 生成失败: ${result.detail}`, 'error');
+                }
+            } catch (error) {
+                showStatus('generate-status', `❌ 网络错误: ${error.message}`, 'error');
+            }
+
+            document.getElementById('generate-btn').disabled = false;
+        });
+
+        // Download as Markdown
+        document.getElementById('download-md').addEventListener('click', () => {
+            if (!generatedContent) return;
+            const blob = new Blob([generatedContent], { type: 'text/markdown;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${generatedTitle}.md`;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+
+        // Download as DOCX
+        document.getElementById('download-docx').addEventListener('click', async () => {
+            if (!generatedContent) return;
+            
+            const btn = document.getElementById('download-docx');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> 生成中...';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/generate/export/docx`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        content: generatedContent,
+                        title: generatedTitle
+                    })
+                });
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${generatedTitle}.docx`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                } else {
+                    const error = await response.json();
+                    alert(`导出失败: ${error.detail || '未知错误'}`);
+                }
+            } catch (error) {
+                alert(`网络错误: ${error.message}`);
+            }
+
+            btn.disabled = false;
+            btn.innerHTML = '📘 Word (.docx)';
+        });
+
+        // Download as PDF
+        document.getElementById('download-pdf').addEventListener('click', async () => {
+            if (!generatedContent) return;
+            
+            const btn = document.getElementById('download-pdf');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> 生成中...';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/generate/export/pdf`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        content: generatedContent,
+                        title: generatedTitle
+                    })
+                });
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${generatedTitle}.pdf`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                } else {
+                    const error = await response.json();
+                    alert(`导出失败: ${error.detail || '未知错误'}`);
+                }
+            } catch (error) {
+                alert(`网络错误: ${error.message}`);
+            }
+
+            btn.disabled = false;
+            btn.innerHTML = '📕 PDF';
+        });
+
+        // ============ Helpers ============
+        function showStatus(elementId, message, type) {
+            const el = document.getElementById(elementId);
+            el.innerHTML = message;
+            el.className = `status ${type}`;
+        }
+
+        // Poll for graph build status
+        async function pollGraphStatus(docId) {
+            const maxAttempts = 60;  // 5 minutes max (5s interval)
+            let attempts = 0;
+            
+            const poll = async () => {
+                attempts++;
+                try {
+                    const response = await fetch(`${API_BASE}/api/graph/status/${docId}`);
+                    const status = await response.json();
+                    
+                    if (status.status === 'completed') {
+                        document.getElementById('stat-entities').textContent = status.entities || 0;
+                        document.getElementById('stat-relations').textContent = status.relations || 0;
+                        showStatus('upload-status', `✅ 文档处理完成！知识图谱已构建 (${status.entities} 实体, ${status.relations} 关系)`, 'success');
+                        return;
+                    } else if (status.status === 'failed') {
+                        document.getElementById('stat-entities').textContent = '失败';
+                        document.getElementById('stat-relations').textContent = '失败';
+                        showStatus('upload-status', `⚠️ 文档已处理，但图谱构建失败: ${status.error || '未知错误'}`, 'error');
+                        return;
+                    } else if (attempts < maxAttempts) {
+                        // Still building, poll again
+                        setTimeout(poll, 5000);
+                    } else {
+                        document.getElementById('stat-entities').textContent = '超时';
+                        document.getElementById('stat-relations').textContent = '超时';
+                        showStatus('upload-status', `⚠️ 图谱构建超时，请稍后刷新查看`, 'loading');
+                    }
+                } catch (error) {
+                    console.error('Poll error:', error);
+                    if (attempts < maxAttempts) {
+                        setTimeout(poll, 5000);
+                    }
+                }
+            };
+            
+            // Start polling after 3 seconds
+            setTimeout(poll, 3000);
+        }
+    </script>
+</body>
+</html>

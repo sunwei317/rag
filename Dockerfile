@@ -2,10 +2,19 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 安装系统依赖
+# 安装系统依赖 (包括 WeasyPrint 所需的 PDF 生成依赖和中文字体)
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
+    # WeasyPrint 依赖
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf-2.0-0 \
+    libffi-dev \
+    shared-mime-info \
+    # 中文字体支持
+    fonts-noto-cjk \
+    fonts-wqy-microhei \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件
