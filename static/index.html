@@ -893,7 +893,16 @@
             sendBtn.disabled = true;
 
             // Add loading message
-            const loadingId = addMessage('<span class="spinner"></span> 思考中...', 'assistant', true);
+            const loadingId = 'loading-' + Date.now();
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'message assistant';
+            loadingDiv.id = loadingId;
+            loadingDiv.innerHTML = `
+                <span class="message-label">AI 助手</span>
+                <div class="message-bubble"><span class="spinner"></span> 思考中...</div>
+            `;
+            chatMessages.appendChild(loadingDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
 
             try {
                 const response = await fetch(`${API_BASE}/api/chat`, {
@@ -904,8 +913,11 @@
 
                 const result = await response.json();
                 
-                // Remove loading message
-                document.getElementById(loadingId)?.remove();
+                // Remove loading message - 确保移除
+                const loadingEl = document.getElementById(loadingId);
+                if (loadingEl) {
+                    loadingEl.remove();
+                }
 
                 if (response.ok) {
                     let answer = result.answer || '抱歉，我无法找到相关答案。';
@@ -955,7 +967,11 @@
                     addMessage(`❌ 错误: ${result.detail || '查询失败'}`, 'assistant');
                 }
             } catch (error) {
-                document.getElementById(loadingId)?.remove();
+                // Remove loading message on error
+                const loadingEl = document.getElementById(loadingId);
+                if (loadingEl) {
+                    loadingEl.remove();
+                }
                 addMessage(`❌ 网络错误: ${error.message}`, 'assistant');
             }
 

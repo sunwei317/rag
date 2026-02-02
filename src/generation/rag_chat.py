@@ -112,6 +112,81 @@ class RAGChat:
             except Exception as e:
                 logger.warning(f"Failed to init LLM client: {e}")
     
+    def _is_short_query(self, query: str, min_chars: int = 8, min_words: int = 2) -> bool:
+        """
+        检查查询是否太短
+        
+        Args:
+            query: 查询文本
+            min_chars: 最小字符数（中文）
+            min_words: 最小词数（适用于分词后）
+        
+        Returns:
+            bool: 是否为短查询
+        """
+        # 去除空白
+        query = query.strip()
+        
+        # 字符数检查
+        if len(query) < min_chars:
+            return True
+        
+        # 使用 jieba 分词检查词数
+        try:
+            import jieba
+            words = [w for w in jieba.cut(query) if w.strip()]
+            if len(words) < min_words:
+                return True
+        except ImportError:
+            pass
+        
+        return False
+    
+    def _enhance_short_query(self, query: str) -> Optional[str]:
+        """
+        使用 LLM 增强短查询
+        
+        Args:
+            query: 原始短查询
+        
+        Returns:
+            Optional[str]: 增强后的查询，失败返回 None
+        """
+        if not self.llm_client:
+            return None
+        
+        try:
+            prompt = f"""你是一个技术文档检索助手。用户输入了一个非常简短的查询，请帮助扩展成一个更完整、更具体的问题。
+
+用户查询: {query}
+
+要求:
+1. 保持用户的原始意图
+2. 扩展成一个完整的问题句
+3. 如果是技术术语，可以添加"是什么"、"如何使用"、"有什么功能"等
+4. 只输出扩展后的问题，不要其他解释
+5. 控制在 30 字以内
+
+扩展后的问题:"""
+
+            response = self.llm_client.chat.completions.create(
+                model="gpt-4.1-mini",  # 使用轻量模型节省成本
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=100
+            )
+            
+            enhanced = response.choices[0].message.content.strip()
+            
+            # 确保增强后的查询有效
+            if enhanced and len(enhanced) > len(query):
+                return enhanced
+            
+        except Exception as e:
+            logger.warning(f"Failed to enhance short query: {e}")
+        
+        return None
+
     def ask(
         self,
         question: str,
@@ -139,7 +214,15 @@ class RAGChat:
         """
         logger.info(f"Processing question: {question[:50]}...")
         
-        # 0. 图谱检索 (Graph RAG)
+        # 0. 短查询增强 - 如果查询太短，使用 LLM 扩展
+        original_question = question
+        if self._is_short_query(question):
+            enhanced = self._enhance_short_query(question)
+            if enhanced:
+                logger.info(f"Short query enhanced: '{question}' -> '{enhanced}'")
+                question = enhanced
+        
+        # 1. 图谱检索 (Graph RAG)
         graph_context = ""
         graph_entities = []
         if use_graph and self.use_graph_context and self.graph_retriever:
@@ -279,21 +362,21 @@ class RAGChat:
         if graph_context:
             context_text = f"{graph_context}\n\n---\n\n{context_text}"
         
-        prompt = f"""你是一个技术文档助手。请根据以下参考资料回答用户的问题。
+        prompt = f"""你是一个严格的技术文档问答助手。你必须严格根据提供的参考资料回答问题。
 
-要求:
-1. 只基于提供的参考资料回答，不要编造信息
-2. 如果参考资料不足以回答问题，请明确说明
-3. 在回答中引用来源，格式为 [来源 X]
-4. 使用清晰、专业的技术文档风格
-5. 如果有知识图谱信息，请利用其中的实体关系来增强回答
+【重要规则】
+1. **严禁编造**: 只能使用参考资料中明确存在的信息，绝对不能添加、推测或编造任何内容
+2. **找不到就说明**: 如果参考资料中没有相关信息，必须明确回答"根据现有文档，未找到关于此问题的相关信息"
+3. **引用来源**: 每个回答点都必须标注来源，格式为 [来源 X]
+4. **原文优先**: 尽量使用参考资料中的原文表述，避免改写或总结
+5. **不做延伸**: 不要提供参考资料之外的建议、解释或背景知识
 
 参考资料:
 {context_text}
 
 用户问题: {question}
 
-请回答:"""
+请严格根据上述参考资料回答:"""
 
         try:
             response = self.llm_client.chat.completions.create(
