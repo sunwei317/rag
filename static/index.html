@@ -878,6 +878,9 @@
         const chatMessages = document.getElementById('chat-messages');
         const chatInput = document.getElementById('chat-input');
         const sendBtn = document.getElementById('send-btn');
+        
+        // 保存对话历史
+        let conversationHistory = [];
 
         chatInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendBtn.click();
@@ -908,7 +911,11 @@
                 const response = await fetch(`${API_BASE}/api/chat`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question: query, top_k: 5 })
+                    body: JSON.stringify({ 
+                        question: query, 
+                        top_k: 5,
+                        conversation_history: conversationHistory.slice(-6)  // 最近3轮对话
+                    })
                 });
 
                 const result = await response.json();
@@ -960,6 +967,14 @@
                             answer += `</div></div>`;
                         });
                         answer += '</div>';
+                    }
+                    
+                    // 更新对话历史
+                    conversationHistory.push({ role: 'user', content: query });
+                    conversationHistory.push({ role: 'assistant', content: result.answer || '' });
+                    // 只保留最近 10 轮对话
+                    if (conversationHistory.length > 20) {
+                        conversationHistory = conversationHistory.slice(-20);
                     }
                     
                     addMessage(answer, 'assistant');

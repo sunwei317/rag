@@ -142,12 +142,59 @@ class RAGChat:
         
         return False
     
-    def _enhance_short_query(self, query: str) -> Optional[str]:
+    def _needs_context_resolution(self, query: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> bool:
         """
-        使用 LLM 增强短查询
+        检查查询是否包含需要结合对话历史解析的指代词或省略
+        
+        Args:
+            query: 查询文本
+            conversation_history: 对话历史
+        
+        Returns:
+            bool: 是否需要上下文解析
+        """
+        if not conversation_history or len(conversation_history) == 0:
+            return False
+        
+        # 检查常见的指代词和省略模式
+        context_patterns = [
+            # 代词指代
+            "它", "这个", "那个", "这些", "那些", "他们", "她们", "它们",
+            "this", "that", "these", "those", "it", "they", "them",
+            # 省略主语的动词开头
+            "怎么", "如何", "能不能", "可以", "有没有",
+            # 追问模式
+            "还有", "另外", "其他", "更多", "继续",
+            # 对比模式
+            "和", "与", "跟", "比较", "区别", "不同",
+            # 序数指代 (第一个问题、上一个、之前的)
+            "第一", "第二", "第三", "第四", "第五",
+            "上一个", "下一个", "前一个", "后一个",
+            "之前", "刚才", "上面", "前面",
+            "那个问题", "这个问题", "同样的问题",
+            # 回答/解释模式
+            "回答", "解释", "详细说明", "展开说说",
+        ]
+        
+        query_lower = query.lower()
+        for pattern in context_patterns:
+            if pattern in query_lower:
+                return True
+        
+        # 检查查询是否以问号结尾但没有明确主语（很短的追问）
+        if query.endswith("?") or query.endswith("？"):
+            if len(query) < 15:
+                return True
+        
+        return False
+    
+    def _enhance_short_query(self, query: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> Optional[str]:
+        """
+        使用 LLM 增强短查询，结合对话历史理解上下文
         
         Args:
             query: 原始短查询
+            conversation_history: 对话历史 [{"role": "user"/"assistant", "content": "..."}]
         
         Returns:
             Optional[str]: 增强后的查询，失败返回 None
@@ -156,18 +203,31 @@ class RAGChat:
             return None
         
         try:
-            prompt = f"""你是一个技术文档检索助手。用户输入了一个非常简短的查询，请帮助扩展成一个更完整、更具体的问题。
-
-用户查询: {query}
+            # 构建对话上下文
+            context_str = ""
+            if conversation_history and len(conversation_history) > 0:
+                # 只取最近 3 轮对话作为上下文
+                recent_history = conversation_history[-6:]  # 3轮 = 6条消息
+                context_parts = []
+                for msg in recent_history:
+                    role = "用户" if msg.get("role") == "user" else "助手"
+                    content = msg.get("content", "")[:200]  # 截取前200字
+                    context_parts.append(f"{role}: {content}")
+                context_str = "\n".join(context_parts)
+                context_str = f"\n\n对话历史:\n{context_str}\n"
+            
+            prompt = f"""你是一个技术文档检索助手。用户输入了一个查询，请结合对话上下文将其扩展成一个完整、明确的问题。{context_str}
+当前用户查询: {query}
 
 要求:
-1. 保持用户的原始意图
-2. 扩展成一个完整的问题句
-3. 如果是技术术语，可以添加"是什么"、"如何使用"、"有什么功能"等
-4. 只输出扩展后的问题，不要其他解释
-5. 控制在 30 字以内
+1. 理解对话上下文，解析指代词（如"它"、"这个"、"那个"）
+2. 将不完整的查询补充完整，使其可以独立理解
+3. 保持用户的原始意图
+4. 如果是技术术语且没有上下文，可以添加"是什么"、"如何使用"等
+5. 只输出扩展后的问题，不要其他解释
+6. 控制在 50 字以内
 
-扩展后的问题:"""
+扩展后的完整问题:"""
 
             response = self.llm_client.chat.completions.create(
                 model="gpt-4.1-mini",  # 使用轻量模型节省成本
@@ -195,7 +255,8 @@ class RAGChat:
         use_query_transform: bool = True,
         use_rerank: bool = True,
         expand_context: bool = True,
-        use_graph: bool = True  # 是否使用图谱增强
+        use_graph: bool = True,  # 是否使用图谱增强
+        conversation_history: Optional[List[Dict[str, str]]] = None  # 对话历史
     ) -> ChatResponse:
         """
         回答问题
@@ -208,18 +269,20 @@ class RAGChat:
             use_rerank: 是否使用重排序
             expand_context: 是否扩展到父 Chunk
             use_graph: 是否使用 Graph RAG 增强
+            conversation_history: 对话历史 [{"role": "user"/"assistant", "content": "..."}]
         
         Returns:
             ChatResponse: 包含答案和引用
         """
         logger.info(f"Processing question: {question[:50]}...")
         
-        # 0. 短查询增强 - 如果查询太短，使用 LLM 扩展
+        # 0. 查询增强 - 结合对话历史理解上下文，或扩展短查询
         original_question = question
-        if self._is_short_query(question):
-            enhanced = self._enhance_short_query(question)
+        needs_enhancement = self._is_short_query(question) or self._needs_context_resolution(question, conversation_history)
+        if needs_enhancement:
+            enhanced = self._enhance_short_query(question, conversation_history)
             if enhanced:
-                logger.info(f"Short query enhanced: '{question}' -> '{enhanced}'")
+                logger.info(f"Query enhanced: '{question}' -> '{enhanced}'")
                 question = enhanced
         
         # 1. 图谱检索 (Graph RAG)

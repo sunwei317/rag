@@ -47,13 +47,18 @@ class ChatRequest(BaseModel):
     filter: Optional[Dict[str, Any]] = None
     top_k: int = 5
     use_rerank: bool = True
+    conversation_history: Optional[List[Dict[str, str]]] = None  # 对话历史
     
     class Config:
         json_schema_extra = {
             "example": {
-                "question": "如何配置网络参数？",
+                "question": "它的配置参数有哪些？",
                 "filter": {"product": "ProductX"},
-                "top_k": 5
+                "top_k": 5,
+                "conversation_history": [
+                    {"role": "user", "content": "OAuth 2.0 是什么？"},
+                    {"role": "assistant", "content": "OAuth 2.0 是一种授权协议..."}
+                ]
             }
         }
 
@@ -650,7 +655,8 @@ async def chat(request: ChatRequest):
     """
     RAG 问答
     
-    基于检索到的文档内容回答问题
+    基于检索到的文档内容回答问题。
+    支持传入对话历史以理解上下文指代。
     """
     components = get_components()
     rag_chat = components["rag_chat"]
@@ -660,7 +666,8 @@ async def chat(request: ChatRequest):
             question=request.question,
             filter_dict=request.filter,
             top_k=request.top_k,
-            use_rerank=request.use_rerank
+            use_rerank=request.use_rerank,
+            conversation_history=request.conversation_history
         )
         
         return ChatResponse(
