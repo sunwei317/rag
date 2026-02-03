@@ -214,7 +214,8 @@ def _init_components():
     # Embedder
     _components["embedder"] = Embedder(
         provider=settings.embedding.provider,
-        model_name=settings.embedding.model_name
+        model_name=settings.embedding.model_name,
+        local_api_url=settings.embedding.local_api_url
     )
     
     # 检索
@@ -242,7 +243,9 @@ def _init_components():
     _components["rag_chat"] = RAGChat(
         hybrid_searcher=_components["hybrid_searcher"],
         reranker=_components["reranker"],
-        graph_retriever=_components["graph_retriever"]
+        graph_retriever=_components["graph_retriever"],
+        local_api_base=settings.llm.local_api_base,
+        local_model=settings.llm.local_model
     )
     
     # Doc Agent

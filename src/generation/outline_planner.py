@@ -70,12 +70,16 @@ class OutlinePlanner:
     def __init__(
         self,
         llm_client=None,
-        model: str = "gpt-4.1",
-        hybrid_searcher=None
+        model: str = "gpt-oss-20b",
+        hybrid_searcher=None,
+        local_api_base: str = None,
+        local_model: str = None
     ):
         self.llm_client = llm_client
         self.model = model
         self.hybrid_searcher = hybrid_searcher
+        self.local_api_base = local_api_base
+        self.local_model = local_model
         
         self._init_llm_client()
         
@@ -89,9 +93,19 @@ class OutlinePlanner:
                 from openai import OpenAI
                 import os
                 
-                api_key = os.getenv("OPENAI_API_KEY")
-                if api_key:
-                    self.llm_client = OpenAI(api_key=api_key)
+                # 优先使用本地 LLM 服务
+                if self.local_api_base:
+                    self.llm_client = OpenAI(
+                        base_url=self.local_api_base,
+                        api_key="not-needed"
+                    )
+                    if self.local_model:
+                        self.model = self.local_model
+                    logger.info(f"OutlinePlanner: Initialized Local LLM: {self.local_api_base}")
+                else:
+                    api_key = os.getenv("OPENAI_API_KEY")
+                    if api_key:
+                        self.llm_client = OpenAI(api_key=api_key)
             except Exception as e:
                 logger.warning(f"Failed to init LLM client: {e}")
     

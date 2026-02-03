@@ -10,13 +10,16 @@ from pathlib import Path
 
 class EmbeddingSettings(BaseSettings):
     """Embedding 模型配置"""
-    provider: Literal["openai", "huggingface", "local"] = "huggingface"
+    provider: Literal["openai", "huggingface", "local", "local_api"] = "local_api"
     model_name: str = "BAAI/bge-m3"
     dimension: int = 1024
     batch_size: int = 32
     
     # OpenAI Embedding
     openai_model: str = "text-embedding-3-large"
+    
+    # 本地 HTTP API Embedding 服务
+    local_api_url: str = "http://localhost:8080/embed"
     
     class Config:
         env_prefix = "EMBEDDING_"
@@ -25,21 +28,25 @@ class EmbeddingSettings(BaseSettings):
 class LLMSettings(BaseSettings):
     """LLM 配置"""
     # 主写作模型
-    writing_provider: Literal["openai", "anthropic", "google"] = "anthropic"
-    writing_model: str = "claude-3-5-sonnet-20241022"
+    writing_provider: Literal["openai", "anthropic", "google", "local"] = "local"
+    writing_model: str = "gpt-oss-20b"
     
     # 规划模型 (需要强推理能力)
-    planning_provider: Literal["openai", "anthropic"] = "openai"
-    planning_model: str = "o3-mini"
+    planning_provider: Literal["openai", "anthropic", "local"] = "local"
+    planning_model: str = "gpt-oss-20b"
     
     # 多模态模型 (PDF解析/图片理解)
-    multimodal_provider: Literal["openai", "google"] = "google"
-    multimodal_model: str = "gemini-1.5-pro"
+    multimodal_provider: Literal["openai", "google", "local"] = "local"
+    multimodal_model: str = "gpt-oss-20b"
     
     # API Keys
     openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
     anthropic_api_key: Optional[str] = Field(default=None, env="ANTHROPIC_API_KEY")
     google_api_key: Optional[str] = Field(default=None, env="GOOGLE_API_KEY")
+    
+    # 本地 LLM 服务配置 (OpenAI 兼容 API)
+    local_api_base: str = "http://localhost:8001/v1"
+    local_model: str = "gpt-oss-20b"
     
     # 通用参数
     temperature: float = 0.3

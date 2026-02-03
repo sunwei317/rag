@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RAG 技术文档系统</title>
+    <!-- Markdown 解析库 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -304,6 +306,95 @@
             color: #333;
             border-bottom-left-radius: 5px;
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Markdown 样式 */
+        .message-bubble h1, .message-bubble h2, .message-bubble h3, .message-bubble h4 {
+            margin: 0.8em 0 0.4em 0;
+            font-weight: 600;
+        }
+        .message-bubble h1 { font-size: 1.4em; }
+        .message-bubble h2 { font-size: 1.2em; }
+        .message-bubble h3 { font-size: 1.1em; }
+        .message-bubble h4 { font-size: 1em; }
+        
+        .message-bubble p {
+            margin: 0.5em 0;
+        }
+        
+        .message-bubble ul, .message-bubble ol {
+            margin: 0.5em 0;
+            padding-left: 1.5em;
+        }
+        
+        .message-bubble li {
+            margin: 0.3em 0;
+        }
+        
+        .message-bubble code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+            color: #e83e8c;
+        }
+        
+        .message-bubble pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 12px 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 0.8em 0;
+        }
+        
+        .message-bubble pre code {
+            background: transparent;
+            color: inherit;
+            padding: 0;
+        }
+        
+        .message-bubble blockquote {
+            border-left: 4px solid #667eea;
+            margin: 0.8em 0;
+            padding: 0.5em 0 0.5em 1em;
+            background: #f9f9f9;
+            color: #666;
+        }
+        
+        .message-bubble table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 0.8em 0;
+        }
+        
+        .message-bubble th, .message-bubble td {
+            border: 1px solid #ddd;
+            padding: 8px 12px;
+            text-align: left;
+        }
+        
+        .message-bubble th {
+            background: #f5f5f5;
+            font-weight: 600;
+        }
+        
+        .message-bubble a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        
+        .message-bubble a:hover {
+            text-decoration: underline;
+        }
+        
+        .message-bubble strong {
+            font-weight: 600;
+        }
+        
+        .message-bubble em {
+            font-style: italic;
         }
 
         .message-label {
@@ -998,9 +1089,34 @@
             const div = document.createElement('div');
             div.className = `message ${type}`;
             div.id = id;
+            
+            // 对助手回复使用 Markdown 渲染
+            let renderedContent = content;
+            if (type === 'assistant' && !isLoading && typeof marked !== 'undefined') {
+                // 配置 marked
+                marked.setOptions({
+                    breaks: true,  // 支持换行
+                    gfm: true,     // GitHub 风格 Markdown
+                    sanitize: false
+                });
+                
+                // 分离引用区域和正文内容
+                const citationsMatch = content.match(/<div class="citations">[\s\S]*<\/div>$/);
+                let mainContent = content;
+                let citations = '';
+                
+                if (citationsMatch) {
+                    mainContent = content.replace(citationsMatch[0], '');
+                    citations = citationsMatch[0];
+                }
+                
+                // 渲染 Markdown 正文
+                renderedContent = marked.parse(mainContent) + citations;
+            }
+            
             div.innerHTML = `
                 <span class="message-label">${type === 'user' ? '您' : 'AI 助手'}</span>
-                <div class="message-bubble">${content}</div>
+                <div class="message-bubble">${renderedContent}</div>
             `;
             chatMessages.appendChild(div);
             chatMessages.scrollTop = chatMessages.scrollHeight;

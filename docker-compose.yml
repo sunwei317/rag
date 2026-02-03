@@ -16,6 +16,8 @@ services:
       - ./src:/app/src
     env_file:
       - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - VECTOR_CHROMA_PERSIST_DIR=/app/data/chroma
       - BM25_PERSIST_PATH=/app/data/bm25_index.pkl

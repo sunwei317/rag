@@ -68,6 +68,7 @@ class RAGChat:
     4. 父子索引上下文扩展
     5. 引用追溯
     6. [NEW] Graph RAG 增强 - 知识图谱上下文融合
+    7. [NEW] 支持本地 LLM 服务
     """
     
     def __init__(
@@ -76,13 +77,16 @@ class RAGChat:
         reranker=None,
         query_transformer=None,
         llm_client=None,
-        model: str = "gpt-4.1",
+        model: str = "gpt-oss-20b",
         parent_chunk_store=None,  # 用于获取父 Chunk
         window_size: int = 2,  # 上下文窗口大小
         # Graph RAG 相关参数
         graph_retriever=None,  # 图谱检索器
         use_graph_context: bool = True,  # 是否使用图谱上下文
-        graph_context_weight: float = 0.3  # 图谱上下文权重
+        graph_context_weight: float = 0.3,  # 图谱上下文权重
+        # 本地 LLM 服务配置
+        local_api_base: str = None,
+        local_model: str = None
     ):
         self.hybrid_searcher = hybrid_searcher
         self.reranker = reranker
@@ -97,6 +101,10 @@ class RAGChat:
         self.use_graph_context = use_graph_context
         self.graph_context_weight = graph_context_weight
         
+        # 本地 LLM 配置
+        self.local_api_base = local_api_base
+        self.local_model = local_model
+        
         self._init_llm_client()
     
     def _init_llm_client(self):
@@ -106,9 +114,21 @@ class RAGChat:
                 from openai import OpenAI
                 import os
                 
-                api_key = os.getenv("OPENAI_API_KEY")
-                if api_key:
-                    self.llm_client = OpenAI(api_key=api_key)
+                # 优先使用本地 LLM 服务
+                if self.local_api_base:
+                    self.llm_client = OpenAI(
+                        base_url=self.local_api_base,
+                        api_key="not-needed"  # 本地服务通常不需要 API key
+                    )
+                    if self.local_model:
+                        self.model = self.local_model
+                    logger.info(f"Initialized Local LLM client: {self.local_api_base}, model: {self.model}")
+                else:
+                    # 回退到 OpenAI
+                    api_key = os.getenv("OPENAI_API_KEY")
+                    if api_key:
+                        self.llm_client = OpenAI(api_key=api_key)
+                        logger.info("Initialized OpenAI LLM client")
             except Exception as e:
                 logger.warning(f"Failed to init LLM client: {e}")
     
@@ -222,6 +242,46 @@ class RAGChat:
         
         return False
     
+    def _check_repeat_request(self, query: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> Optional[ChatResponse]:
+        """
+        检查是否是重复回答请求（如"再回答一次"、"重复一遍"）
+        
+        如果是，直接返回上次的回答；否则返回 None
+        """
+        if not conversation_history or len(conversation_history) < 2:
+            return None
+        
+        # 检查是否是重复请求的模式
+        repeat_patterns = [
+            "再回答", "再说一遍", "再说一次", "重复一遍", "重复一次",
+            "再来一遍", "再来一次", "重新回答", "再生成一次", "再生成一遍",
+            "说一遍", "说一次", "讲一遍", "讲一次",
+            "repeat", "again", "say again", "one more time"
+        ]
+        
+        query_lower = query.lower().strip()
+        is_repeat_request = any(pattern in query_lower for pattern in repeat_patterns)
+        
+        if not is_repeat_request:
+            return None
+        
+        # 查找上一次的助手回答
+        for i in range(len(conversation_history) - 1, -1, -1):
+            msg = conversation_history[i]
+            if msg.get("role") == "assistant":
+                last_answer = msg.get("content", "")
+                if last_answer:
+                    logger.info(f"Repeat request detected, returning last answer")
+                    return ChatResponse(
+                        answer=last_answer,
+                        references=[],  # 重复回答不需要再次显示来源
+                        query=query,
+                        context_used=[],
+                        model=self.model
+                    )
+        
+        return None
+
     def _needs_context_resolution(self, query: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> bool:
         """
         检查查询是否包含需要结合对话历史解析的指代词或省略
@@ -355,6 +415,11 @@ class RAGChat:
         """
         logger.info(f"Processing question: {question[:50]}...")
         
+        # -1. 检查是否是重复回答请求
+        repeat_response = self._check_repeat_request(question, conversation_history)
+        if repeat_response:
+            return repeat_response
+        
         # 0. 查询增强 - 结合对话历史理解上下文，或扩展短查询
         original_question = question
         needs_enhancement = self._is_short_query(question) or self._needs_context_resolution(question, conversation_history)
@@ -459,9 +524,14 @@ class RAGChat:
         # 6. 生成答案 (包含图谱上下文)
         answer = self._generate_answer(question, contexts, references, graph_context)
         
+        # 7. 如果回答表示未找到相关信息，清空引用列表
+        final_references = references
+        if "未找到" in answer or "没有相关信息" in answer or "无法找到" in answer:
+            final_references = []
+        
         return ChatResponse(
             answer=answer,
-            references=references,
+            references=final_references,
             query=question,
             context_used=contexts,
             model=self.model
@@ -508,8 +578,8 @@ class RAGChat:
 
 【重要规则】
 1. **严禁编造**: 只能使用参考资料中明确存在的信息，绝对不能添加、推测或编造任何内容
-2. **找不到就说明**: 如果参考资料中没有相关信息，必须明确回答"根据现有文档，未找到关于此问题的相关信息"
-3. **引用来源**: 每个回答点都必须标注来源，格式为 [来源 X]
+2. **找不到就说明**: 如果参考资料中没有相关信息，必须回答"根据现有文档，未找到关于此问题的相关信息。"（注意：此时不要添加任何 [来源 X] 标注）
+3. **引用来源**: 只有当你确实从参考资料中找到相关信息时，才标注来源，格式为 [来源 X]
 4. **原文优先**: 尽量使用参考资料中的原文表述，避免改写或总结
 5. **不做延伸**: 不要提供参考资料之外的建议、解释或背景知识
 

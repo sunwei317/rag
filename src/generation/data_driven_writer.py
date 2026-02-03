@@ -119,7 +119,7 @@ class DataDrivenWriter:
         graph_store=None,
         vector_store=None,
         llm_client=None,
-        model: str = "gpt-4.1-mini",
+        model: str = "gpt-oss-20b",
         # 文档长度控制
         max_entities_per_type: Optional[int] = None,
         max_sections: Optional[int] = None,
@@ -127,12 +127,17 @@ class DataDrivenWriter:
         detail_level: str = "standard",  # brief, standard, detailed
         include_relations: bool = True,
         include_chunks: bool = False,
-        entity_types: Optional[List[str]] = None  # 要包含的实体类型
+        entity_types: Optional[List[str]] = None,  # 要包含的实体类型
+        # 本地 LLM 服务配置
+        local_api_base: str = None,
+        local_model: str = None
     ):
         self.graph_store = graph_store
         self.vector_store = vector_store
         self.llm_client = llm_client
         self.model = model
+        self.local_api_base = local_api_base
+        self.local_model = local_model
         
         # 获取细节级别配置
         self.detail_config = self.DETAIL_CONFIGS.get(detail_level, self.DETAIL_CONFIGS["standard"]).copy()
@@ -156,7 +161,18 @@ class DataDrivenWriter:
             try:
                 from openai import OpenAI
                 import os
-                self.llm_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+                
+                # 优先使用本地 LLM 服务
+                if self.local_api_base:
+                    self.llm_client = OpenAI(
+                        base_url=self.local_api_base,
+                        api_key="not-needed"
+                    )
+                    if self.local_model:
+                        self.model = self.local_model
+                    logger.info(f"DataDrivenWriter: Initialized Local LLM: {self.local_api_base}")
+                else:
+                    self.llm_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             except Exception as e:
                 logger.warning(f"Failed to init LLM client: {e}")
     

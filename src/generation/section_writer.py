@@ -166,22 +166,42 @@ class SectionWriter:
     def __init__(
         self,
         llm_client=None,
-        model: str = "claude-3-5-sonnet-20241022",
+        model: str = "gpt-oss-20b",
         hybrid_searcher=None,
         reranker=None,
-        terminology_manager=None
+        terminology_manager=None,
+        local_api_base: str = None,
+        local_model: str = None
     ):
         self.llm_client = llm_client
         self.model = model
         self.hybrid_searcher = hybrid_searcher
         self.reranker = reranker
         self.terminology_manager = terminology_manager
+        self.local_api_base = local_api_base
+        self.local_model = local_model
         
         self._init_llm_client()
     
     def _init_llm_client(self):
         """初始化 LLM 客户端"""
         if self.llm_client is None:
+            # 优先使用本地 LLM 服务
+            if self.local_api_base:
+                try:
+                    from openai import OpenAI
+                    self.llm_client = OpenAI(
+                        base_url=self.local_api_base,
+                        api_key="not-needed"
+                    )
+                    self._client_type = "openai"  # 本地服务使用 OpenAI 兼容 API
+                    if self.local_model:
+                        self.model = self.local_model
+                    logger.info(f"SectionWriter: Initialized Local LLM: {self.local_api_base}")
+                    return
+                except Exception as e:
+                    logger.warning(f"Failed to init local LLM client: {e}")
+            
             try:
                 # 尝试使用 Anthropic
                 from anthropic import Anthropic
