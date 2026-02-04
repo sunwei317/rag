@@ -6,6 +6,8 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from loguru import logger
 
+from config.settings import settings
+
 
 @dataclass
 class SectionPlan:
@@ -70,16 +72,16 @@ class OutlinePlanner:
     def __init__(
         self,
         llm_client=None,
-        model: str = "gpt-oss-20b",
+        model: str = None,
         hybrid_searcher=None,
         local_api_base: str = None,
         local_model: str = None
     ):
         self.llm_client = llm_client
-        self.model = model
+        self.model = model or settings.llm.local_model
         self.hybrid_searcher = hybrid_searcher
-        self.local_api_base = local_api_base
-        self.local_model = local_model
+        self.local_api_base = local_api_base or settings.llm.local_api_base
+        self.local_model = local_model or settings.llm.local_model
         
         self._init_llm_client()
         

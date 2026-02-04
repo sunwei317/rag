@@ -2,9 +2,9 @@
 FastAPI 服务
 提供 RESTful API 接口
 """
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
@@ -13,6 +13,7 @@ import shutil
 import uuid
 import asyncio
 from datetime import datetime
+import os
 from loguru import logger
 
 import sys
@@ -137,6 +138,18 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal Server Error",
+            "error": str(exc)
+        }
+    )
+
 # CORS
 app.add_middleware(
     CORSMiddleware,
@@ -185,7 +198,7 @@ _graph_build_tasks: Dict[str, Dict[str, Any]] = {}
 
 def get_components():
     """懒加载组件"""
-    if _components["vector_store"] is None:
+    if _components["vector_store"] is None or _components["ingestion_pipeline"] is None:
         _init_components()
     return _components
 
@@ -227,6 +240,13 @@ def _init_components():
         bm25_weight=settings.retrieval.bm25_weight
     )
     
+    # Ingestion Pipeline (关键组件，优先初始化)
+    _components["ingestion_pipeline"] = IngestionPipeline(
+        vector_store=_components["vector_store"],
+        bm25_store=_components["bm25_store"],
+        embedder=_components["embedder"]
+    )
+
     # Reranker
     if settings.reranker.enabled:
         try:
@@ -240,36 +260,55 @@ def _init_components():
     _init_graph_components()
     
     # RAG Chat (带 graph_retriever)
-    _components["rag_chat"] = RAGChat(
-        hybrid_searcher=_components["hybrid_searcher"],
-        reranker=_components["reranker"],
-        graph_retriever=_components["graph_retriever"],
-        local_api_base=settings.llm.local_api_base,
-        local_model=settings.llm.local_model
-    )
-    
+    try:
+        _components["rag_chat"] = RAGChat(
+            hybrid_searcher=_components["hybrid_searcher"],
+            reranker=_components["reranker"],
+            graph_retriever=_components["graph_retriever"],
+            local_api_base=settings.llm.local_api_base,
+            local_model=settings.llm.local_model
+        )
+    except Exception as e:
+        logger.warning(f"Failed to initialize RAGChat: {e}")
+
     # Doc Agent
-    _components["doc_agent"] = DocAgent(
-        hybrid_searcher=_components["hybrid_searcher"],
-        reranker=_components["reranker"]
-    )
-    
-    # Ingestion Pipeline
-    _components["ingestion_pipeline"] = IngestionPipeline(
-        vector_store=_components["vector_store"],
-        bm25_store=_components["bm25_store"],
-        embedder=_components["embedder"]
-    )
+    try:
+        _components["doc_agent"] = DocAgent(
+            hybrid_searcher=_components["hybrid_searcher"],
+            reranker=_components["reranker"]
+        )
+    except Exception as e:
+        logger.warning(f"Failed to initialize DocAgent: {e}")
     
     logger.info("Components initialized successfully")
 
 
 def _init_graph_components():
     """初始化 Graph RAG 组件"""
-    import os
-    
-    neo4j_uri = os.getenv("NEO4J_URI")
-    
+    # 统一用 settings 读取 Neo4j 配置
+    graph_settings = getattr(settings, "graph", None) or {}
+    neo4j_uri = (
+        os.getenv("NEO4J_URI")
+        or getattr(settings, "neo4j_uri", None)
+        or getattr(settings, "NEO4J_URI", None)
+        or graph_settings.get("uri")
+        or None
+    )
+    neo4j_user = (
+        os.getenv("NEO4J_USER")
+        or getattr(settings, "neo4j_user", None)
+        or getattr(settings, "NEO4J_USER", None)
+        or graph_settings.get("user")
+        or "neo4j"
+    )
+    neo4j_password = (
+        os.getenv("NEO4J_PASSWORD")
+        or getattr(settings, "neo4j_password", None)
+        or getattr(settings, "NEO4J_PASSWORD", None)
+        or graph_settings.get("password")
+        or "password"
+    )
+    logger.info(f"Initializing Graph RAG components: NEO4J_URI={neo4j_uri}")
     if neo4j_uri:
         # 使用 Neo4j
         try:
@@ -278,8 +317,7 @@ def _init_graph_components():
             from src.knowledge_graph.entity_extractor import EntityExtractor
             from src.knowledge_graph.relation_builder import RelationBuilder
             
-            neo4j_user = os.getenv("NEO4J_USER", "neo4j")
-            neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+            logger.info(f"Attempting to connect to Neo4j at {neo4j_uri} with user {neo4j_user}")
             
             _components["graph_store"] = Neo4jStore(
                 uri=neo4j_uri,
@@ -290,11 +328,23 @@ def _init_graph_components():
             _components["entity_extractor"] = EntityExtractor()
             _components["relation_builder"] = RelationBuilder()
             
-            logger.info(f"Graph RAG initialized with Neo4j at {neo4j_uri}")
+            logger.info(f"✅ Graph RAG initialized successfully with Neo4j at {neo4j_uri}")
         except Exception as e:
-            logger.warning(f"Failed to initialize Neo4j Graph RAG: {e}")
+            logger.error(f"❌ Failed to initialize Neo4j Graph RAG: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            # 即使 Neo4j 初始化失败，也初始化其他组件
+            try:
+                from src.knowledge_graph.entity_extractor import EntityExtractor
+                from src.knowledge_graph.relation_builder import RelationBuilder
+                _components["entity_extractor"] = EntityExtractor()
+                _components["relation_builder"] = RelationBuilder()
+                logger.warning("Initialized entity extractor and relation builder without graph store")
+            except Exception as e2:
+                logger.error(f"Failed to initialize graph components: {e2}")
     else:
         # 使用内存图存储
+        logger.info("NEO4J_URI not set, using InMemoryGraphStore")
         try:
             from src.knowledge_graph.graph_store import InMemoryGraphStore
             from src.knowledge_graph.graph_retriever import GraphRetriever
@@ -307,9 +357,11 @@ def _init_graph_components():
             _components["entity_extractor"] = EntityExtractor()
             _components["relation_builder"] = RelationBuilder()
             
-            logger.info("Graph RAG initialized with InMemoryGraphStore")
+            logger.info("✅ Graph RAG initialized with InMemoryGraphStore")
         except Exception as e:
-            logger.warning(f"Failed to initialize Graph RAG: {e}")
+            logger.error(f"❌ Failed to initialize Graph RAG: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
 
 # ==================== 路由 ====================
@@ -353,6 +405,9 @@ async def ingest_document(request: IngestRequest):
     """
     components = get_components()
     pipeline = components["ingestion_pipeline"]
+    if pipeline is None:
+        logger.error("Ingestion pipeline is not initialized")
+        raise HTTPException(status_code=503, detail="Ingestion pipeline not ready")
     
     if not request.pdf_path:
         raise HTTPException(status_code=400, detail="pdf_path is required")
@@ -384,12 +439,12 @@ async def ingest_document(request: IngestRequest):
 async def upload_and_ingest(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    product: Optional[str] = None,
-    version: Optional[str] = None,
-    doc_type: Optional[str] = None,
-    build_graph: bool = True,
-    async_graph: bool = True,  # 是否异步构建图谱
-    use_neo4j: bool = True     # 是否使用 Neo4j (否则使用内存存储)
+    product: Optional[str] = Form(None),
+    version: Optional[str] = Form(None),
+    doc_type: Optional[str] = Form(None),
+    build_graph: str = Form("true"),  # FormData 传递的是字符串
+    async_graph: str = Form("true"),  # 是否异步构建图谱
+    use_neo4j: str = Form("true")     # 是否使用 Neo4j (否则使用内存存储)
 ):
     """
     上传并摄取文档
@@ -412,6 +467,11 @@ async def upload_and_ingest(
     
     file_path = upload_dir / f"{uuid.uuid4().hex}_{file.filename}"
     
+    # 将字符串转换为布尔值
+    build_graph_bool = build_graph.lower() in ("true", "1", "yes", "on")
+    async_graph_bool = async_graph.lower() in ("true", "1", "yes", "on")
+    use_neo4j_bool = use_neo4j.lower() in ("true", "1", "yes", "on")
+    
     try:
         with open(file_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
@@ -429,8 +489,8 @@ async def upload_and_ingest(
         
         # 构建知识图谱
         graph_stats = None
-        if build_graph and components.get("entity_extractor"):
-            if async_graph:
+        if build_graph_bool and components.get("entity_extractor"):
+            if async_graph_bool:
                 # 异步后台构建图谱
                 _graph_build_tasks[stats.doc_id] = {
                     "status": "pending",
@@ -439,18 +499,18 @@ async def upload_and_ingest(
                     "entities": 0,
                     "relations": 0,
                     "error": None,
-                    "use_neo4j": use_neo4j
+                    "use_neo4j": use_neo4j_bool
                 }
                 background_tasks.add_task(
                     _build_knowledge_graph_background,
                     stats.doc_id,
                     components,
-                    use_neo4j
+                    use_neo4j_bool
                 )
                 graph_stats = {"status": "building", "task_id": stats.doc_id}
             else:
                 # 同步构建
-                graph_stats = await _build_knowledge_graph(stats.doc_id, components, use_neo4j)
+                graph_stats = await _build_knowledge_graph(stats.doc_id, components, use_neo4j_bool)
         
         return {
             "success": True,
@@ -534,12 +594,16 @@ async def _build_knowledge_graph(doc_id: str, components: dict, use_neo4j: bool 
         relation_builder = components["relation_builder"]
         
         # 根据选项选择图存储
+        logger.info(f"Graph build request: use_neo4j={use_neo4j}, graph_store available={components.get('graph_store') is not None}")
+        
         if use_neo4j and components.get("graph_store"):
             graph_store = components["graph_store"]
-            logger.info(f"Using Neo4j graph store for {doc_id}")
+            logger.info(f"✅ Using Neo4j graph store for {doc_id} (type: {type(graph_store).__name__})")
         else:
             # 使用内存存储
-            from src.knowledge_graph import InMemoryGraphStore
+            if use_neo4j:
+                logger.warning(f"⚠️ Neo4j requested but graph_store not available. Check NEO4J_URI environment variable.")
+            from src.knowledge_graph.graph_store import InMemoryGraphStore
             graph_store = InMemoryGraphStore(persist_path=f"./data/graph_{doc_id}.json")
             logger.info(f"Using in-memory graph store for {doc_id}")
         
@@ -558,33 +622,59 @@ async def _build_knowledge_graph(doc_id: str, components: dict, use_neo4j: bool 
             for c in all_chunks
         ]
         
-        # 批量抽取实体（优化：更大批次 + 更高并行度）
+        # 批量抽取实体（优化：降低阈值 + 更小批次避免token耗尽）
         all_entities = entity_extractor.extract_from_chunks(
             chunks_data,
-            min_content_length=80,  # 跳过短内容
-            max_concurrent=5,  # 提高并行度
-            batch_size=8  # 更大批次
+            min_content_length=30,  # 降低阈值，保留更多chunks（从80降到30）
+            max_concurrent=2,  # 进一步降低并行度（从3降到2），避免同时消耗太多token
+            batch_size=3  # 进一步减小批次（从5降到3），确保每次有足够token生成完整JSON
         )
         
         # 批量添加实体到图（使用批量接口）
         if hasattr(graph_store, 'add_entities_batch'):
-            graph_store.add_entities_batch(all_entities)
+            added_count = graph_store.add_entities_batch(all_entities)
+            logger.info(f"Added {added_count} entities to graph (batch)")
         else:
             for entity in all_entities:
                 graph_store.add_entity(entity)
+            logger.info(f"Added {len(all_entities)} entities to graph (individual)")
         
-        logger.info(f"Added {len(all_entities)} entities to graph")
+        logger.info(f"Total entities extracted: {len(all_entities)}")
         
-        # 构建关系（限制处理数量）
-        chunks_for_relation = chunks_data[:10] if len(chunks_data) > 10 else chunks_data
+        # 构建关系（限制 chunk 数量以提升速度）
+        relation_max_chunks_env = os.getenv("GRAPH_RELATION_MAX_CHUNKS")
+        try:
+            relation_max_chunks = int(relation_max_chunks_env) if relation_max_chunks_env else 15
+        except ValueError:
+            relation_max_chunks = 15
+        chunks_for_relation = chunks_data[:relation_max_chunks]
         
         if all_entities and chunks_for_relation:
-            relations = relation_builder.build_relations(
-                all_entities, 
-                chunks_for_relation,
-                max_concurrent=5,
-                max_chunks=10
-            )
+            # 临时降低关系构建器的置信度阈值以获取更多关系
+            original_min_confidence = relation_builder.min_confidence
+            relation_builder.min_confidence = 0.3  # 降低阈值（从默认0.5降到0.3）
+            
+            # 启用共现关系以增加关系数量
+            original_use_cooccurrence = relation_builder.use_cooccurrence
+            relation_builder.use_cooccurrence = True  # 启用共现关系
+            
+            try:
+                relation_max_concurrent_env = os.getenv("GRAPH_RELATION_MAX_CONCURRENT")
+                try:
+                    relation_max_concurrent = int(relation_max_concurrent_env) if relation_max_concurrent_env else 4
+                except ValueError:
+                    relation_max_concurrent = 4
+
+                relations = relation_builder.build_relations(
+                    all_entities,
+                    chunks_for_relation,
+                    max_concurrent=relation_max_concurrent,
+                    max_chunks=len(chunks_for_relation)
+                )
+            finally:
+                # 恢复原始设置
+                relation_builder.min_confidence = original_min_confidence
+                relation_builder.use_cooccurrence = original_use_cooccurrence
             # 批量添加关系
             if hasattr(graph_store, 'add_relations_batch'):
                 graph_store.add_relations_batch(relations)

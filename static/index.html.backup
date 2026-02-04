@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RAG Technical Documentation System</title>
-    <!-- Markdown Parser Library -->
+    <title>RAG 技术文档系统</title>
+    <!-- Markdown 解析库 -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         * {
@@ -308,7 +308,7 @@
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
         }
 
-        /* Markdown Styles */
+        /* Markdown 样式 */
         .message-bubble h1, .message-bubble h2, .message-bubble h3, .message-bubble h4 {
             margin: 0.8em 0 0.4em 0;
             font-weight: 600;
@@ -317,20 +317,20 @@
         .message-bubble h2 { font-size: 1.2em; }
         .message-bubble h3 { font-size: 1.1em; }
         .message-bubble h4 { font-size: 1em; }
-
+        
         .message-bubble p {
             margin: 0.5em 0;
         }
-
+        
         .message-bubble ul, .message-bubble ol {
             margin: 0.5em 0;
             padding-left: 1.5em;
         }
-
+        
         .message-bubble li {
             margin: 0.3em 0;
         }
-
+        
         .message-bubble code {
             background: #f4f4f4;
             padding: 2px 6px;
@@ -339,7 +339,7 @@
             font-size: 0.9em;
             color: #e83e8c;
         }
-
+        
         .message-bubble pre {
             background: #2d2d2d;
             color: #f8f8f2;
@@ -348,13 +348,13 @@
             overflow-x: auto;
             margin: 0.8em 0;
         }
-
+        
         .message-bubble pre code {
             background: transparent;
             color: inherit;
             padding: 0;
         }
-
+        
         .message-bubble blockquote {
             border-left: 4px solid #667eea;
             margin: 0.8em 0;
@@ -362,37 +362,37 @@
             background: #f9f9f9;
             color: #666;
         }
-
+        
         .message-bubble table {
             border-collapse: collapse;
             width: 100%;
             margin: 0.8em 0;
         }
-
+        
         .message-bubble th, .message-bubble td {
             border: 1px solid #ddd;
             padding: 8px 12px;
             text-align: left;
         }
-
+        
         .message-bubble th {
             background: #f5f5f5;
             font-weight: 600;
         }
-
+        
         .message-bubble a {
             color: #667eea;
             text-decoration: none;
         }
-
+        
         .message-bubble a:hover {
             text-decoration: underline;
         }
-
+        
         .message-bubble strong {
             font-weight: 600;
         }
-
+        
         .message-bubble em {
             font-style: italic;
         }
@@ -622,7 +622,7 @@
             .tabs {
                 flex-direction: column;
             }
-
+            
             .metadata-form, .generate-options, .generate-settings, .stats-grid {
                 grid-template-columns: 1fr;
             }
@@ -632,24 +632,24 @@
 <body>
     <div class="container">
         <header>
-            <h1>📚 RAG Technical Documentation System</h1>
-            <p>Intelligent Document Processing · RAG Q&A · Document Generation</p>
+            <h1>📚 RAG 技术文档系统</h1>
+            <p>智能文档处理 · RAG 问答 · 文档生成</p>
         </header>
 
         <div class="tabs">
-            <button class="tab-btn active" data-tab="upload">📤 Upload Document</button>
-            <button class="tab-btn" data-tab="query">💬 Smart Q&A</button>
-            <button class="tab-btn" data-tab="generate">📝 Document Generation</button>
+            <button class="tab-btn active" data-tab="upload">📤 上传文档</button>
+            <button class="tab-btn" data-tab="query">💬 智能问答</button>
+            <button class="tab-btn" data-tab="generate">📝 文档生成</button>
         </div>
 
         <!-- Upload Tab -->
         <div id="upload" class="tab-content active">
-            <h2 class="section-title">Upload Technical Documents</h2>
-
+            <h2 class="section-title">上传技术文档</h2>
+            
             <div class="upload-zone" id="drop-zone">
                 <div style="font-size: 3rem; margin-bottom: 15px;">📄</div>
-                <p><strong>Drag files here</strong> or <span style="color: #667eea; cursor: pointer;">click to select files</span></p>
-                <p class="formats">Supported formats: PDF (Text-based/Scanned)</p>
+                <p><strong>拖拽文件到此处</strong> 或 <span style="color: #667eea; cursor: pointer;">点击选择文件</span></p>
+                <p class="formats">支持格式: PDF (文字版/扫描版)</p>
             </div>
             <input type="file" id="file-input" accept=".pdf" />
 
@@ -657,48 +657,48 @@
 
             <div class="metadata-form">
                 <div class="form-group">
-                    <label>Product Name</label>
-                    <input type="text" id="product" placeholder="e.g.: SmartHome Pro" />
+                    <label>产品名称</label>
+                    <input type="text" id="product" placeholder="如: SmartHome Pro" />
                 </div>
                 <div class="form-group">
-                    <label>Version</label>
-                    <input type="text" id="version" placeholder="e.g.: v2.5.0" />
+                    <label>版本号</label>
+                    <input type="text" id="version" placeholder="如: v2.5.0" />
                 </div>
                 <div class="form-group">
-                    <label>Document Type</label>
+                    <label>文档类型</label>
                     <select id="doc-type">
-                        <option value="user_manual">User Manual</option>
-                        <option value="api_reference">API Reference</option>
-                        <option value="installation_guide">Installation Guide</option>
-                        <option value="troubleshooting">Troubleshooting</option>
-                        <option value="release_notes">Release Notes</option>
+                        <option value="user_manual">用户手册</option>
+                        <option value="api_reference">API 参考</option>
+                        <option value="installation_guide">安装指南</option>
+                        <option value="troubleshooting">故障排除</option>
+                        <option value="release_notes">发布说明</option>
                     </select>
                 </div>
             </div>
 
             <div class="graph-options">
-                <label class="options-label">Knowledge Graph Building</label>
+                <label class="options-label">知识图谱构建</label>
                 <div class="radio-group">
                     <label class="radio-label">
                         <input type="radio" name="graph-store" value="none" checked />
                         <span class="radio-custom"></span>
-                        <span class="radio-text">⚡ Vector Only <small>(Default, fastest)</small></span>
+                        <span class="radio-text">⚡ 仅向量检索 <small>(默认，最快)</small></span>
                     </label>
                     <label class="radio-label">
                         <input type="radio" name="graph-store" value="neo4j" />
                         <span class="radio-custom"></span>
-                        <span class="radio-text">🔷 Neo4j Graph <small>(Recommended, supports graph queries)</small></span>
+                        <span class="radio-text">🔷 Neo4j 图谱 <small>(推荐，支持图查询)</small></span>
                     </label>
                     <label class="radio-label">
                         <input type="radio" name="graph-store" value="memory" />
                         <span class="radio-custom"></span>
-                        <span class="radio-text">💾 Memory Graph <small>(Lightweight, lost on restart)</small></span>
+                        <span class="radio-text">💾 内存图谱 <small>(轻量，重启后丢失)</small></span>
                     </label>
                 </div>
             </div>
 
             <button class="btn btn-primary" id="upload-btn" disabled>
-                📤 Start Upload and Processing
+                📤 开始上传并处理
             </button>
 
             <div id="upload-status" class="status"></div>
@@ -706,102 +706,102 @@
             <div class="stats-grid" id="upload-stats" style="display: none;">
                 <div class="stat-card">
                     <div class="value" id="stat-chunks">0</div>
-                    <div class="label">Document Chunks</div>
+                    <div class="label">文档片段</div>
                 </div>
                 <div class="stat-card">
                     <div class="value" id="stat-entities">0</div>
-                    <div class="label">Entities Count</div>
+                    <div class="label">实体数量</div>
                 </div>
                 <div class="stat-card">
                     <div class="value" id="stat-relations">0</div>
-                    <div class="label">Relations Count</div>
+                    <div class="label">关系数量</div>
                 </div>
                 <div class="stat-card">
                     <div class="value" id="stat-time">0s</div>
-                    <div class="label">Processing Time</div>
+                    <div class="label">处理时间</div>
                 </div>
             </div>
         </div>
 
         <!-- Query Tab -->
         <div id="query" class="tab-content">
-            <h2 class="section-title">Smart Q&A (RAG)</h2>
-
+            <h2 class="section-title">智能问答 (RAG)</h2>
+            
             <div class="chat-container">
                 <div class="chat-messages" id="chat-messages">
                     <div class="message assistant">
-                        <span class="message-label">AI Assistant</span>
+                        <span class="message-label">AI 助手</span>
                         <div class="message-bubble">
-                            Hello! I'm a technical document RAG assistant. Please enter your question, and I will provide accurate answers based on the uploaded documents.
+                            您好！我是技术文档 RAG 助手。请输入您的问题，我会基于已上传的文档为您提供准确答案。
                         </div>
                     </div>
                 </div>
-
+                
                 <div class="chat-input-container">
-                    <input type="text" id="chat-input" placeholder="Enter your question..." />
-                    <button class="btn btn-primary" id="send-btn">Send</button>
+                    <input type="text" id="chat-input" placeholder="输入您的问题..." />
+                    <button class="btn btn-primary" id="send-btn">发送</button>
                 </div>
             </div>
         </div>
 
         <!-- Generate Tab -->
         <div id="generate" class="tab-content">
-            <h2 class="section-title">Data-Driven Document Generation</h2>
-
+            <h2 class="section-title">数据驱动文档生成</h2>
+            
             <p style="color: #666; margin-bottom: 20px;">
-                Generate technical documents based on data in the knowledge graph and vector store, strictly using existing data without fabricating content.
+                基于知识图谱和向量存储中的数据生成技术文档，严格使用已有数据，不编造内容。
             </p>
 
-            <h4 style="margin-bottom: 15px;">Select Document Type</h4>
+            <h4 style="margin-bottom: 15px;">选择文档类型</h4>
             <div class="generate-options">
                 <div class="option-card selected" data-type="api_reference">
-                    <h4>📖 API Reference Document</h4>
-                    <p>Contains API interfaces, configuration items, error codes, etc.</p>
+                    <h4>📖 API 参考文档</h4>
+                    <p>包含 API 接口、配置项、错误码等</p>
                 </div>
                 <div class="option-card" data-type="user_manual">
-                    <h4>📘 User Manual</h4>
-                    <p>Contains product features, operation guides, configuration instructions</p>
+                    <h4>📘 用户手册</h4>
+                    <p>包含产品功能、操作指南、配置说明</p>
                 </div>
                 <div class="option-card" data-type="installation_guide">
-                    <h4>🔧 Installation Guide</h4>
-                    <p>Contains dependencies, configurations, commands, etc.</p>
+                    <h4>🔧 安装指南</h4>
+                    <p>包含依赖、配置、命令等</p>
                 </div>
                 <div class="option-card" data-type="general">
-                    <h4>📋 General Document</h4>
-                    <p>Contains all types of entity information</p>
+                    <h4>📋 通用文档</h4>
+                    <p>包含所有类型的实体信息</p>
                 </div>
             </div>
 
-            <h4 style="margin-bottom: 15px;">Generation Settings</h4>
+            <h4 style="margin-bottom: 15px;">生成设置</h4>
             <div class="generate-settings">
                 <div class="form-group">
-                    <label>Document Title</label>
-                    <input type="text" id="gen-title" placeholder="Auto-generated or enter custom title" />
+                    <label>文档标题</label>
+                    <input type="text" id="gen-title" placeholder="自动生成或输入自定义标题" />
                 </div>
                 <div class="form-group">
-                    <label>Detail Level</label>
+                    <label>细节级别</label>
                     <select id="gen-detail">
-                        <option value="brief">Brief</option>
-                        <option value="standard" selected>Standard</option>
-                        <option value="detailed">Detailed</option>
+                        <option value="brief">简略 (Brief)</option>
+                        <option value="standard" selected>标准 (Standard)</option>
+                        <option value="detailed">详细 (Detailed)</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>Max Sections</label>
+                    <label>最大章节数</label>
                     <input type="number" id="gen-sections" value="10" min="1" max="50" />
                 </div>
             </div>
 
             <div style="display: flex; gap: 10px;">
-                <button class="btn btn-primary" id="generate-btn">🚀 Generate Document</button>
-                <button class="btn btn-primary" id="preview-btn" style="background: #28a745;">📊 Preview Data</button>
+                <button class="btn btn-primary" id="generate-btn">🚀 生成文档</button>
+                <button class="btn btn-primary" id="preview-btn" style="background: #28a745;">📊 预览数据</button>
             </div>
 
             <div id="generate-status" class="status"></div>
 
             <div class="output-area" id="output-area" style="display: none;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h4>📄 Generation Result</h4>
+                    <h4>📄 生成结果</h4>
                     <div class="download-buttons" id="download-buttons" style="display: flex; gap: 10px;">
                         <button class="btn" id="download-md" style="background: #6c757d; padding: 8px 15px; font-size: 0.9rem;">
                             📝 Markdown
@@ -840,7 +840,7 @@
         let selectedFile = null;
 
         dropZone.addEventListener('click', () => fileInput.click());
-
+        
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
             dropZone.classList.add('dragover');
@@ -867,7 +867,7 @@
 
         function handleFile(file) {
             if (!file.name.endsWith('.pdf')) {
-                showStatus('upload-status', 'Please select a PDF file', 'error');
+                showStatus('upload-status', '请选择 PDF 文件', 'error');
                 return;
             }
             selectedFile = file;
@@ -905,9 +905,9 @@
             formData.append('use_neo4j', useNeo4j);
 
             uploadBtn.disabled = true;
-            const graphMsg = buildGraph ? (useNeo4j ? '(Neo4j Graph)' : '(Memory Graph)') : '(No Graph)';
-            showStatus('upload-status', `<span class="spinner"></span> Uploading and processing document ${graphMsg}, please wait...`, 'loading');
-
+            const graphMsg = buildGraph ? (useNeo4j ? '(Neo4j图谱)' : '(内存图谱)') : '(无图谱)';
+            showStatus('upload-status', `<span class="spinner"></span> 正在上传并处理文档 ${graphMsg}，请稍候...`, 'loading');
+            
             const startTime = Date.now();
 
             try {
@@ -916,44 +916,31 @@
                     body: formData
                 });
 
-                let result = null;
-                let errorText = '';
-                const contentType = response.headers.get('content-type') || '';
-                if (contentType.includes('application/json')) {
-                    result = await response.json();
-                } else {
-                    const rawText = await response.text();
-                    try {
-                        result = JSON.parse(rawText);
-                    } catch (parseError) {
-                        errorText = rawText;
-                    }
-                }
-
+                const result = await response.json();
                 const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
                 if (response.ok) {
                     // Show stats immediately
                     document.getElementById('upload-stats').style.display = 'grid';
-
+                    
                     // Get chunks from nested stats object
                     const stats = result.stats || {};
                     const childChunks = stats.child_chunks || result.child_chunks || 0;
                     document.getElementById('stat-chunks').textContent = childChunks;
                     document.getElementById('stat-time').textContent = elapsed + 's';
-
+                    
                     // Handle graph stats based on option selected
                     if (!buildGraph) {
-                        document.getElementById('stat-entities').textContent = 'Disabled';
-                        document.getElementById('stat-relations').textContent = 'Disabled';
-                        showStatus('upload-status', `✅ Document processing completed! Doc ID: ${result.doc_id} (No graph built)`, 'success');
+                        document.getElementById('stat-entities').textContent = '未启用';
+                        document.getElementById('stat-relations').textContent = '未启用';
+                        showStatus('upload-status', `✅ 文档处理完成！文档ID: ${result.doc_id} (未构建图谱)`, 'success');
                     } else {
                         // Check if graph is being built asynchronously
                         const graphStats = result.graph_stats;
                         if (graphStats && graphStats.status === 'building') {
-                            showStatus('upload-status', `✅ Document processing completed! Doc ID: ${result.doc_id}<br/>Knowledge graph is building in the background...`, 'success');
-                            document.getElementById('stat-entities').textContent = 'Building';
-                            document.getElementById('stat-relations').textContent = 'Building';
+                            showStatus('upload-status', `✅ 文档处理完成！文档ID: ${result.doc_id}<br/>知识图谱正在后台构建中...`, 'success');
+                            document.getElementById('stat-entities').textContent = '后台构建';
+                            document.getElementById('stat-relations').textContent = '后台构建';
 
                             // Show notification when graph build completes
                             notifyGraphBuildCompletion(result.doc_id);
@@ -961,19 +948,18 @@
                             // Sync graph build completed
                             document.getElementById('stat-entities').textContent = graphStats.entities || 0;
                             document.getElementById('stat-relations').textContent = graphStats.relations || 0;
-                            showStatus('upload-status', `✅ Document processing completed! Doc ID: ${result.doc_id}`, 'success');
+                            showStatus('upload-status', `✅ 文档处理完成！文档ID: ${result.doc_id}`, 'success');
                         } else {
-                            document.getElementById('stat-entities').textContent = 'Not Enabled';
-                            document.getElementById('stat-relations').textContent = 'Not Enabled';
-                            showStatus('upload-status', `✅ Document processing completed! Doc ID: ${result.doc_id}`, 'success');
+                            document.getElementById('stat-entities').textContent = '未启用';
+                            document.getElementById('stat-relations').textContent = '未启用';
+                            showStatus('upload-status', `✅ 文档处理完成！文档ID: ${result.doc_id}`, 'success');
                         }
                     }
                 } else {
-                    const detail = (result && (result.detail || result.message)) || errorText || `HTTP ${response.status}`;
-                    showStatus('upload-status', `❌ Upload failed: ${detail}`, 'error');
+                    showStatus('upload-status', `❌ 上传失败: ${result.detail || '未知错误'}`, 'error');
                 }
             } catch (error) {
-                showStatus('upload-status', `❌ Network error: ${error.message}`, 'error');
+                showStatus('upload-status', `❌ 网络错误: ${error.message}`, 'error');
             }
 
             uploadBtn.disabled = false;
@@ -983,8 +969,8 @@
         const chatMessages = document.getElementById('chat-messages');
         const chatInput = document.getElementById('chat-input');
         const sendBtn = document.getElementById('send-btn');
-
-        // Save conversation history
+        
+        // 保存对话历史
         let conversationHistory = [];
 
         chatInput.addEventListener('keypress', (e) => {
@@ -1006,8 +992,8 @@
             loadingDiv.className = 'message assistant';
             loadingDiv.id = loadingId;
             loadingDiv.innerHTML = `
-                <span class="message-label">AI Assistant</span>
-                <div class="message-bubble"><span class="spinner"></span> Thinking...</div>
+                <span class="message-label">AI 助手</span>
+                <div class="message-bubble"><span class="spinner"></span> 思考中...</div>
             `;
             chatMessages.appendChild(loadingDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -1016,27 +1002,27 @@
                 const response = await fetch(`${API_BASE}/api/chat`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        question: query,
+                    body: JSON.stringify({ 
+                        question: query, 
                         top_k: 5,
-                        conversation_history: conversationHistory.slice(-6)  // Last 3 conversations
+                        conversation_history: conversationHistory.slice(-6)  // 最近3轮对话
                     })
                 });
 
                 const result = await response.json();
-
-                // Remove loading message - ensure removal
+                
+                // Remove loading message - 确保移除
                 const loadingEl = document.getElementById(loadingId);
                 if (loadingEl) {
                     loadingEl.remove();
                 }
 
                 if (response.ok) {
-                    let answer = result.answer || 'Sorry, I cannot find relevant answers.';
-
+                    let answer = result.answer || '抱歉，我无法找到相关答案。';
+                    
                     // Add references if available
                     if (result.references && result.references.length > 0) {
-                        // Deduplicate: based on content_preview
+                        // 去重：根据 content_preview 去重
                         const seenContent = new Set();
                         const uniqueRefs = result.references.filter(r => {
                             const content = r.content_preview || r.chunk_id || '';
@@ -1046,22 +1032,22 @@
                             seenContent.add(content);
                             return true;
                         });
-
-                        // Remap citation markers in the answer based on the deduplicated count
+                        
+                        // 重新映射回答中的引用标记，根据去重后的数量调整
                         const refCount = Math.min(uniqueRefs.length, 5);
-                        // Remove excess citation markers (if deduplicated to 3, remove [Source 4][Source 5], etc.)
+                        // 移除多余的引用标记（如果去重后只有3个，就移除[来源 4][来源 5]等）
                         for (let i = refCount + 1; i <= 10; i++) {
                             answer = answer.replace(new RegExp(`\\[来源\\s*${i}\\]`, 'g'), '');
                         }
-
-                        answer += `\n\n<div class="citations"><strong>📚 References (${refCount}):</strong> <span style="font-size: 0.8rem; color: #888;">(Click to expand details)</span>`;
+                        
+                        answer += `\n\n<div class="citations"><strong>📚 参考来源 (${refCount}):</strong> <span style="font-size: 0.8rem; color: #888;">(点击展开详情)</span>`;
                         uniqueRefs.slice(0, 5).forEach((r, i) => {
-                            const docTitle = r.doc_title || r.source || 'Document';
+                            const docTitle = r.doc_title || r.source || '文档';
                             const section = r.section_title || '';
-                            const page = r.page ? `Page ${r.page}` : '';
+                            const page = r.page ? `第${r.page}页` : '';
                             const preview = r.content_preview || '';
                             const chunkId = r.chunk_id || '';
-
+                            
                             answer += `<div class="reference-item" style="margin: 10px 0; border-radius: 8px; border: 1px solid #e0e0e0; overflow: hidden;">`;
                             answer += `<div class="ref-header" onclick="this.parentElement.classList.toggle('expanded')" style="padding: 12px; background: #f5f5f5; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid #667eea;">`;
                             answer += `<div><span style="font-weight: 600; color: #333;">📄 ${i + 1}. ${docTitle}</span>`;
@@ -1073,18 +1059,18 @@
                         });
                         answer += '</div>';
                     }
-
-                    // Update conversation history
+                    
+                    // 更新对话历史
                     conversationHistory.push({ role: 'user', content: query });
                     conversationHistory.push({ role: 'assistant', content: result.answer || '' });
-                    // Keep only the last 10 conversations
+                    // 只保留最近 10 轮对话
                     if (conversationHistory.length > 20) {
                         conversationHistory = conversationHistory.slice(-20);
                     }
-
+                    
                     addMessage(answer, 'assistant');
                 } else {
-                    addMessage(`❌ Error: ${result.detail || 'Query failed'}`, 'assistant');
+                    addMessage(`❌ 错误: ${result.detail || '查询失败'}`, 'assistant');
                 }
             } catch (error) {
                 // Remove loading message on error
@@ -1092,7 +1078,7 @@
                 if (loadingEl) {
                     loadingEl.remove();
                 }
-                addMessage(`❌ Network error: ${error.message}`, 'assistant');
+                addMessage(`❌ 网络错误: ${error.message}`, 'assistant');
             }
 
             sendBtn.disabled = false;
@@ -1103,34 +1089,33 @@
             const div = document.createElement('div');
             div.className = `message ${type}`;
             div.id = id;
-
-            // For assistant replies, use Markdown rendering
+            
+            // 对助手回复使用 Markdown 渲染
             let renderedContent = content;
             if (type === 'assistant' && !isLoading && typeof marked !== 'undefined') {
-                // Configure marked
+                // 配置 marked
                 marked.setOptions({
-                    breaks: true,  // Support line breaks
-                    gfm: true,     // GitHub-style Markdown
+                    breaks: true,  // 支持换行
+                    gfm: true,     // GitHub 风格 Markdown
                     sanitize: false
                 });
-
-                // Separate citation area and main content
-                const citationMarker = '<div class="citations">';
-                const citationIndex = content.lastIndexOf(citationMarker);
+                
+                // 分离引用区域和正文内容
+                const citationsMatch = content.match(/<div class="citations">[\s\S]*<\/div>$/);
                 let mainContent = content;
                 let citations = '';
-
-                if (citationIndex !== -1) {
-                    mainContent = content.slice(0, citationIndex);
-                    citations = content.slice(citationIndex);
+                
+                if (citationsMatch) {
+                    mainContent = content.replace(citationsMatch[0], '');
+                    citations = citationsMatch[0];
                 }
-
-                // Render Markdown main content
+                
+                // 渲染 Markdown 正文
                 renderedContent = marked.parse(mainContent) + citations;
             }
-
+            
             div.innerHTML = `
-                <span class="message-label">${type === 'user' ? 'You' : 'AI Assistant'}</span>
+                <span class="message-label">${type === 'user' ? '您' : 'AI 助手'}</span>
                 <div class="message-bubble">${renderedContent}</div>
             `;
             chatMessages.appendChild(div);
@@ -1147,30 +1132,30 @@
         });
 
         document.getElementById('preview-btn').addEventListener('click', async () => {
-            showStatus('generate-status', '<span class="spinner"></span> Retrieving data statistics...', 'loading');
+            showStatus('generate-status', '<span class="spinner"></span> 正在获取数据统计...', 'loading');
 
             try {
                 const response = await fetch(`${API_BASE}/api/generate/preview-data`);
                 const result = await response.json();
 
                 if (response.ok) {
-                    let info = `📊 Database Statistics:\n`;
-                    info += `• Entities: ${result.entity_count}\n`;
-                    info += `• Relations: ${result.relation_count}\n`;
-                    info += `• Document Chunks: ${result.chunk_count}\n\n`;
-                    info += `Entity Type Distribution:\n`;
+                    let info = `📊 数据库统计:\n`;
+                    info += `• 实体数量: ${result.entity_count}\n`;
+                    info += `• 关系数量: ${result.relation_count}\n`;
+                    info += `• 文档片段: ${result.chunk_count}\n\n`;
+                    info += `实体类型分布:\n`;
                     for (const [type, count] of Object.entries(result.entities_by_type || {})) {
                         info += `  - ${type}: ${count}\n`;
                     }
-
+                    
                     document.getElementById('output-area').style.display = 'block';
                     document.getElementById('output-content').textContent = info;
-                    showStatus('generate-status', '✅ Data preview successful', 'success');
+                    showStatus('generate-status', '✅ 数据预览成功', 'success');
                 } else {
-                    showStatus('generate-status', `❌ Preview failed: ${result.detail}`, 'error');
+                    showStatus('generate-status', `❌ 预览失败: ${result.detail}`, 'error');
                 }
             } catch (error) {
-                showStatus('generate-status', `❌ Network error: ${error.message}`, 'error');
+                showStatus('generate-status', `❌ 网络错误: ${error.message}`, 'error');
             }
         });
 
@@ -1178,18 +1163,18 @@
         let generatedContent = '';
         let generatedTitle = '';
         let generatedDocType = '';
-
-        // Document type corresponding file name prefixes
+        
+        // 文档类型对应的文件名前缀
         const docTypeNames = {
-            'api_reference': 'API_Reference_Document',
-            'user_manual': 'User_Manual',
-            'installation_guide': 'Installation_Guide',
-            'general': 'Technical_Document'
+            'api_reference': 'API参考文档',
+            'user_manual': '用户手册',
+            'installation_guide': '安装指南',
+            'general': '技术文档'
         };
-
-        // Generate timestamped file name
+        
+        // 生成带时间戳的文件名
         function generateFileName(ext) {
-            const typeName = docTypeNames[generatedDocType] || 'Technical_Document';
+            const typeName = docTypeNames[generatedDocType] || '技术文档';
             const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
             const shortTitle = generatedTitle.slice(0, 20).replace(/[^\w\u4e00-\u9fff]/g, '_');
             return `${typeName}_${shortTitle}_${timestamp}.${ext}`;
@@ -1201,11 +1186,11 @@
             const detailLevel = document.getElementById('gen-detail').value;
             const maxSections = parseInt(document.getElementById('gen-sections').value) || 10;
 
-            showStatus('generate-status', '<span class="spinner"></span> Generating document, please wait...', 'loading');
+            showStatus('generate-status', '<span class="spinner"></span> 正在生成文档，请稍候...', 'loading');
             document.getElementById('generate-btn').disabled = true;
             document.getElementById('download-buttons').style.display = 'none';
-
-            // Clear previous generation results
+            
+            // 清除之前的生成结果
             document.getElementById('output-area').style.display = 'none';
             document.getElementById('output-content').textContent = '';
             generatedContent = '';
@@ -1228,20 +1213,20 @@
                 const result = await response.json();
 
                 if (response.ok) {
-                    showStatus('generate-status', `✅ Document generation successful! Sections: ${result.sections_count}, Entities: ${result.entity_count}`, 'success');
+                    showStatus('generate-status', `✅ 文档生成成功！章节数: ${result.sections_count}, 实体: ${result.entity_count}`, 'success');
                     document.getElementById('output-area').style.display = 'block';
-                    document.getElementById('output-content').textContent = result.content || 'No content';
-
+                    document.getElementById('output-content').textContent = result.content || '无内容';
+                    
                     // Store for downloads
                     generatedContent = result.content || '';
-                    generatedTitle = result.title || title || 'Technical Document';
+                    generatedTitle = result.title || title || '技术文档';
                     generatedDocType = docType;
                     document.getElementById('download-buttons').style.display = 'flex';
                 } else {
-                    showStatus('generate-status', `❌ Generation failed: ${result.detail}`, 'error');
+                    showStatus('generate-status', `❌ 生成失败: ${result.detail}`, 'error');
                 }
             } catch (error) {
-                showStatus('generate-status', `❌ Network error: ${error.message}`, 'error');
+                showStatus('generate-status', `❌ 网络错误: ${error.message}`, 'error');
             }
 
             document.getElementById('generate-btn').disabled = false;
@@ -1262,10 +1247,10 @@
         // Download as DOCX
         document.getElementById('download-docx').addEventListener('click', async () => {
             if (!generatedContent) return;
-
+            
             const btn = document.getElementById('download-docx');
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner"></span> Generating...';
+            btn.innerHTML = '<span class="spinner"></span> 生成中...';
 
             try {
                 const response = await fetch(`${API_BASE}/api/generate/export/docx`, {
@@ -1287,10 +1272,10 @@
                     URL.revokeObjectURL(url);
                 } else {
                     const error = await response.json();
-                    alert(`Export failed: ${error.detail || 'Unknown error'}`);
+                    alert(`导出失败: ${error.detail || '未知错误'}`);
                 }
             } catch (error) {
-                alert(`Network error: ${error.message}`);
+                alert(`网络错误: ${error.message}`);
             }
 
             btn.disabled = false;
@@ -1300,10 +1285,10 @@
         // Download as PDF
         document.getElementById('download-pdf').addEventListener('click', async () => {
             if (!generatedContent) return;
-
+            
             const btn = document.getElementById('download-pdf');
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner"></span> Generating...';
+            btn.innerHTML = '<span class="spinner"></span> 生成中...';
 
             try {
                 const response = await fetch(`${API_BASE}/api/generate/export/pdf`, {
@@ -1325,10 +1310,10 @@
                     URL.revokeObjectURL(url);
                 } else {
                     const error = await response.json();
-                    alert(`Export failed: ${error.detail || 'Unknown error'}`);
+                    alert(`导出失败: ${error.detail || '未知错误'}`);
                 }
             } catch (error) {
-                alert(`Network error: ${error.message}`);
+                alert(`网络错误: ${error.message}`);
             }
 
             btn.disabled = false;
@@ -1346,30 +1331,30 @@
         async function pollGraphStatus(docId) {
             const maxAttempts = 180;  // 15 minutes max (5s interval) - increased to handle longer processing times
             let attempts = 0;
-
+            
             const poll = async () => {
                 attempts++;
                 try {
                     const response = await fetch(`${API_BASE}/api/graph/status/${docId}`);
                     const status = await response.json();
-
+                    
                     if (status.status === 'completed') {
                         document.getElementById('stat-entities').textContent = status.entities || 0;
                         document.getElementById('stat-relations').textContent = status.relations || 0;
-                        showStatus('upload-status', `✅ Document processing completed! Knowledge graph built (${status.entities} entities, ${status.relations} relations)`, 'success');
+                        showStatus('upload-status', `✅ 文档处理完成！知识图谱已构建 (${status.entities} 实体, ${status.relations} 关系)`, 'success');
                         return;
                     } else if (status.status === 'failed') {
-                        document.getElementById('stat-entities').textContent = 'Failed';
-                        document.getElementById('stat-relations').textContent = 'Failed';
-                        showStatus('upload-status', `⚠️ Document processed, but graph building failed: ${status.error || 'Unknown error'}`, 'error');
+                        document.getElementById('stat-entities').textContent = '失败';
+                        document.getElementById('stat-relations').textContent = '失败';
+                        showStatus('upload-status', `⚠️ 文档已处理，但图谱构建失败: ${status.error || '未知错误'}`, 'error');
                         return;
                     } else if (attempts < maxAttempts) {
                         // Still building, poll again
                         setTimeout(poll, 5000);
                     } else {
-                        document.getElementById('stat-entities').textContent = 'Timeout';
-                        document.getElementById('stat-relations').textContent = 'Timeout';
-                        showStatus('upload-status', `⚠️ Graph building timed out, please refresh later`, 'loading');
+                        document.getElementById('stat-entities').textContent = '超时';
+                        document.getElementById('stat-relations').textContent = '超时';
+                        showStatus('upload-status', `⚠️ 图谱构建超时，请稍后刷新查看`, 'loading');
                     }
                 } catch (error) {
                     console.error('Poll error:', error);
@@ -1378,7 +1363,7 @@
                     }
                 }
             };
-
+            
             // Start polling after 3 seconds
             setTimeout(poll, 3000);
         }
@@ -1400,7 +1385,7 @@
                         clearInterval(checkInterval);
 
                         // Show notification
-                        showStatus('upload-status', `✅ Knowledge graph building completed! (${status.entities} entities, ${status.relations} relations)`, 'success');
+                        showStatus('upload-status', `✅ 知识图谱构建完成！(${status.entities} 实体, ${status.relations} 关系)`, 'success');
 
                         // Update stats
                         document.getElementById('stat-entities').textContent = status.entities || 0;
@@ -1408,8 +1393,8 @@
 
                         // Optionally show browser notification if supported
                         if ('Notification' in window && Notification.permission === 'granted') {
-                            new Notification('Knowledge Graph Building Completed', {
-                                body: `Document ${docId} knowledge graph has been built with ${status.entities} entities and ${status.relations} relations.`,
+                            new Notification('知识图谱构建完成', {
+                                body: `文档 ${docId} 的知识图谱已构建完成，包含 ${status.entities} 个实体和 ${status.relations} 个关系。`,
                                 icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">✅</text></svg>'
                             });
                         }
@@ -1417,15 +1402,15 @@
                         clearInterval(checkInterval);
 
                         // Show failure notification
-                        showStatus('upload-status', `⚠️ Knowledge graph building failed: ${status.error || 'Unknown error'}`, 'error');
+                        showStatus('upload-status', `⚠️ 知识图谱构建失败: ${status.error || '未知错误'}`, 'error');
 
                         // Update stats to show failure
-                        document.getElementById('stat-entities').textContent = 'Failed';
-                        document.getElementById('stat-relations').textContent = 'Failed';
+                        document.getElementById('stat-entities').textContent = '失败';
+                        document.getElementById('stat-relations').textContent = '失败';
 
                         if ('Notification' in window && Notification.permission === 'granted') {
-                            new Notification('Knowledge Graph Building Failed', {
-                                body: `Knowledge graph building for document ${docId} failed: ${status.error || 'Unknown error'}`,
+                            new Notification('知识图谱构建失败', {
+                                body: `文档 ${docId} 的知识图谱构建失败: ${status.error || '未知错误'}`,
                                 icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">❌</text></svg>'
                             });
                         }

@@ -32,20 +32,20 @@ class Embedder:
     
     def __init__(
         self,
-        provider: str = "local_api",
-        model_name: str = "BAAI/bge-m3",
-        dimension: int = 1024,
-        batch_size: int = 32,
+        provider: Optional[str] = None,
+        model_name: Optional[str] = None,
+        dimension: Optional[int] = None,
+        batch_size: Optional[int] = None,
         openai_api_key: Optional[str] = None,
-        local_api_url: str = "http://localhost:8080/embed"
+        local_api_url: Optional[str] = None
     ):
-        self.provider = provider
-        self.model_name = model_name
-        self.dimension = dimension
-        self.batch_size = batch_size
-        self.openai_api_key = openai_api_key
-        self.local_api_url = local_api_url
-        
+        from config.settings import settings
+        self.provider = provider or settings.embedding.provider
+        self.model_name = model_name or settings.embedding.model_name
+        self.dimension = dimension or settings.embedding.dimension
+        self.batch_size = batch_size or settings.embedding.batch_size
+        self.openai_api_key = openai_api_key or settings.llm.openai_api_key
+        self.local_api_url = local_api_url or settings.embedding.local_api_url
         self._model = None
         self._init_model()
     

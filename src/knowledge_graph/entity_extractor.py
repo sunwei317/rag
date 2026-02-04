@@ -14,6 +14,7 @@
 import json
 import hashlib
 import os
+from config.settings import settings
 import pickle
 from enum import Enum
 from typing import List, Dict, Any, Optional, Set
@@ -93,12 +94,12 @@ class Entity:
 
 
 # LLM 实体抽取的 Prompt 模板
-ENTITY_EXTRACTION_PROMPT = """你是一个技术文档实体抽取专家。请从以下技术文档片段中抽取所有相关实体。
+ENTITY_EXTRACTION_PROMPT = """从以下技术文档片段中抽取实体。直接输出JSON，不要添加任何说明文字。
 
 文档内容:
 {content}
 
-请抽取以下类型的实体:
+抽取以下类型的实体:
 1. product - 产品、组件、模块、服务名称
 2. api - API 端点、接口、方法名
 3. config - 配置项、参数名
@@ -110,27 +111,17 @@ ENTITY_EXTRACTION_PROMPT = """你是一个技术文档实体抽取专家。请�
 9. dependency - 依赖包、库
 10. platform - 操作系统、运行环境
 
-请以 JSON 格式输出，格式如下:
-```json
+输出JSON格式（仅JSON，不要其他文字）:
 {{
     "entities": [
         {{
             "name": "实体名称",
             "type": "实体类型",
-            "aliases": ["别名1", "别名2"],
+            "aliases": ["别名1"],
             "description": "简短描述"
         }}
     ]
-}}
-```
-
-注意:
-- 只抽取明确提到的实体，不要推测
-- 实体名称使用原文中的形式
-- 技术术语的缩写和全称都作为别名记录
-- 描述应该简洁，一句话概括实体的用途
-
-输出:"""
+}}"""
 
 
 class EntityExtractor:
@@ -146,28 +137,41 @@ class EntityExtractor:
     def __init__(
         self,
         llm_client=None,
-        model: str = "gpt-4.1-mini",
+        model: Optional[str] = None,
         batch_size: int = 5,
         min_mentions: int = 1,  # 最少提及次数才保留
+        min_content_length: Optional[int] = None,  # 最小内容长度
         cache_dir: Optional[str] = None,  # 缓存目录
         enable_cache: bool = True  # 是否启用缓存
     ):
         self.llm_client = llm_client
-        self.model = model
-        self.batch_size = batch_size
-        self.min_mentions = min_mentions
-        self.enable_cache = enable_cache
+        # 优先使用传入参数，否则用 settings.llm.local_model
+        self.model = model or settings.llm.local_model
         
-        # 设置缓存目录
-        self.cache_dir = Path(cache_dir) if cache_dir else Path("/tmp/entity_cache")
+        # 从 settings 加载 Graph RAG 配置（如果可用）
+        try:
+            # 使用传入参数或 settings 配置，都有默认值回退
+            self.batch_size = batch_size or (settings.graph.get('entity_batch_size') if settings.graph else None) or 5
+            self.min_mentions = min_mentions or (settings.graph.get('entity_min_mentions') if settings.graph else None) or 1
+            self.min_content_length = min_content_length or (settings.graph.get('entity_min_content_length') if settings.graph else None) or 50
+            self.enable_cache = enable_cache if enable_cache is not None else (settings.graph.get('enable_cache') if settings.graph else None) or True
+            self.cache_dir = Path(cache_dir) if cache_dir else (Path(settings.graph.get('cache_persist_path')) if settings.graph and settings.graph.get('cache_persist_path') else Path("/tmp/entity_cache"))
+        except AttributeError:
+            # 如果 settings 不可用，使用默认值
+            self.batch_size = batch_size or 5
+            self.min_mentions = min_mentions or 1
+            self.min_content_length = min_content_length or 50
+            self.enable_cache = enable_cache if enable_cache is not None else True
+            self.cache_dir = Path(cache_dir) if cache_dir else Path("/tmp/entity_cache")
+        
         if self.enable_cache:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self._init_llm_client()
-        
+
         # 实体缓存，用于去重和合并
         self._entity_cache: Dict[str, Entity] = {}
-        
+
         # 内容哈希缓存 - 避免重复抽取
         self._content_hash_cache: Dict[str, List[Entity]] = {}
         self._load_cache()
@@ -204,13 +208,26 @@ class EntityExtractor:
     
     def _init_llm_client(self):
         """初始化 LLM 客户端"""
-        if self.llm_client is None:
-            try:
-                from openai import OpenAI
-                import os
-                self.llm_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            except Exception as e:
-                logger.warning(f"Failed to init OpenAI client: {e}")
+        if self.llm_client is not None:
+            return
+        try:
+            from openai import OpenAI
+            # 优先使用本地 LLM 服务 (OpenAI 兼容 API)
+            if settings.llm.writing_provider == "local":
+                self.llm_client = OpenAI(
+                    api_key="EMPTY",  # 本地服务通常不校验 key
+                    base_url=settings.llm.local_api_base
+                )
+                self.model = settings.llm.local_model
+            elif settings.llm.writing_provider == "openai":
+                self.llm_client = OpenAI(
+                    api_key=settings.llm.openai_api_key
+                )
+                self.model = settings.llm.writing_model
+            else:
+                raise ValueError(f"Unsupported LLM provider: {settings.llm.writing_provider}")
+        except Exception as e:
+            logger.warning(f"Failed to init LLM client: {e}")
     
     def extract_from_text(
         self, 
@@ -346,9 +363,10 @@ class EntityExtractor:
         ]
         
         if not valid_chunks:
+            logger.warning(f"No valid chunks after filtering (min_length={min_content_length})")
             return []
         
-        logger.info(f"Processing {len(valid_chunks)}/{len(chunks)} valid chunks")
+        logger.info(f"Processing {len(valid_chunks)}/{len(chunks)} valid chunks (min_length={min_content_length})")
         
         # 2. 批量合并 - 每 batch_size 个 chunks 合并成一个请求
         batches = []
@@ -361,8 +379,9 @@ class EntityExtractor:
             ])
             chunk_ids = [c.get("chunk_id", "") for c in batch]
             batches.append((combined_content, chunk_ids))
+            logger.debug(f"Batch {len(batches)}: {len(batch)} chunks, content length: {len(combined_content)}")
         
-        logger.info(f"Created {len(batches)} batches for LLM extraction")
+        logger.info(f"Created {len(batches)} batches for LLM extraction (batch_size={actual_batch_size})")
         
         # 3. 并行处理批次
         all_entities = []
@@ -370,10 +389,14 @@ class EntityExtractor:
         def process_batch(batch_data):
             content, chunk_ids = batch_data
             try:
+                logger.info(f"Processing batch with {len(chunk_ids)} chunks, content length: {len(content)}")
                 entities = self._extract_batch(content, chunk_ids)
+                logger.info(f"Batch completed: extracted {len(entities)} entities")
                 return entities
             except Exception as e:
                 logger.error(f"Batch extraction failed: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 return []
         
         # 使用线程池并行处理
@@ -417,23 +440,165 @@ class EntityExtractor:
             return cached_entities
         
         try:
-            response = self.llm_client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "你是技术文档实体抽取专家，擅长识别技术文档中的关键实体。请从多个文档片段中抽取实体。"
-                    },
-                    {
-                        "role": "user",
-                        "content": ENTITY_EXTRACTION_PROMPT.format(content=combined_content[:8000])
-                    }
-                ],
-                temperature=0.1,
-                response_format={"type": "json_object"}
-            )
+            if not self.llm_client:
+                logger.error("LLM client not initialized")
+                return []
             
-            result = json.loads(response.choices[0].message.content)
+            # 限制内容长度，避免超时和token耗尽
+            # 进一步降低内容长度，确保有足够token用于完整JSON响应
+            content_preview = combined_content[:1500]  # 从2000降到1500，为JSON响应预留更多token
+            prompt_content = ENTITY_EXTRACTION_PROMPT.format(content=content_preview)
+            
+            logger.info(f"Calling LLM for entity extraction, content length: {len(content_preview)}, prompt length: {len(prompt_content)}, model: {self.model}")
+            
+            try:
+                import time
+                start_time = time.time()
+                response = self.llm_client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "你是技术文档实体抽取专家，擅长识别技术文档中的关键实体。请从多个文档片段中抽取实体。直接输出JSON，不要添加额外说明。"
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt_content
+                        }
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                    max_tokens=8000,  # 大幅增加最大token数（从4000提高到8000）
+                    stop=None  # 明确不设置stop tokens
+                )
+                elapsed = time.time() - start_time
+                logger.info(f"LLM call completed in {elapsed:.2f}s")
+            except Exception as e:
+                logger.error(f"LLM API call failed: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                return []
+            
+            if not response:
+                logger.error(f"LLM returned None response")
+                return []
+            
+            if not response.choices:
+                logger.error(f"LLM response has no choices. Full response: {response}")
+                return []
+            
+            if not response.choices[0].message:
+                logger.error(f"LLM response choice has no message. Response: {response}")
+                return []
+            
+            finish_reason = response.choices[0].finish_reason if response.choices else None
+            message_content = response.choices[0].message.content
+            
+            if not message_content:
+                logger.error(f"LLM returned empty content. Finish reason: {finish_reason}")
+                logger.error(f"Response type: {type(response)}, Choices count: {len(response.choices) if response.choices else 0}")
+                
+                # 如果是因为长度限制，尝试从reasoning中提取JSON
+                if finish_reason == 'length':
+                    reasoning = getattr(response.choices[0].message, 'reasoning', None) or getattr(response.choices[0].message, 'reasoning_content', None)
+                    if reasoning:
+                        logger.warning(f"Response truncated (finish_reason=length). Attempting to extract JSON from reasoning...")
+                        logger.warning(f"Reasoning length: {len(reasoning)}")
+                        
+                        # 尝试从reasoning中提取JSON
+                        import re
+                        json_match = re.search(r'\{[\s\S]*"entities"[\s\S]*\}', reasoning)
+                        if json_match:
+                            try:
+                                result = json.loads(json_match.group())
+                                logger.info("Successfully extracted JSON from reasoning field")
+                                entities = self._parse_entities(result, chunk_ids[0] if chunk_ids else None)
+                                for entity in entities:
+                                    entity.source_chunks = chunk_ids
+                                return entities
+                            except Exception as e:
+                                logger.error(f"Failed to parse JSON from reasoning: {e}")
+                        else:
+                            logger.warning("Could not find JSON in reasoning field")
+                    else:
+                        logger.warning("No reasoning field available")
+                
+                return []
+            
+            content = message_content.strip()
+            if not content:
+                logger.error(f"LLM returned empty content after strip")
+                return []
+            
+            logger.debug(f"LLM returned content (first 200 chars): {content[:200]}")
+            
+            try:
+                result = json.loads(content)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON response: {e}")
+                logger.error(f"Content that failed to parse (first 1000 chars): {content[:1000]}")
+                
+                # 尝试修复常见的JSON问题
+                try:
+                    # 1. 尝试提取JSON部分（更宽松的匹配）
+                    import re
+                    # 匹配从第一个 { 开始到最后一个 } 结束
+                    json_match = re.search(r'\{[\s\S]*\}', content)
+                    if json_match:
+                        json_str = json_match.group()
+                        
+                        # 尝试修复截断的JSON
+                        # 1. 查找所有完整的实体对象（更宽松的匹配）
+                        # 匹配实体对象，允许description字段可能未闭合
+                        entity_pattern = r'\{"name":"[^"]*","type":"[^"]*"(?:,"aliases":\[[^\]]*\])?(?:,"description":"[^"]*")?\}'
+                        entities_matches = list(re.finditer(entity_pattern, json_str))
+                        
+                        if entities_matches and len(entities_matches) > 0:
+                            # 构建有效的JSON，只包含完整的实体
+                            valid_entities = []
+                            for match in entities_matches:
+                                try:
+                                    # 验证每个实体是否是有效的JSON
+                                    entity_json = json.loads(match.group())
+                                    valid_entities.append(entity_json)
+                                except:
+                                    continue
+                            
+                            if valid_entities:
+                                result = {"entities": valid_entities}
+                                logger.info(f"Successfully extracted {len(valid_entities)} entities from truncated JSON")
+                            else:
+                                result = {"entities": []}
+                                logger.warning("No valid entities found in truncated JSON")
+                        else:
+                            # 如果找不到完整实体，尝试简单修复
+                            # 移除未闭合的部分
+                            if '"entities":[' in json_str:
+                                # 找到entities数组的开始
+                                start_idx = json_str.find('"entities":[') + len('"entities":[')
+                                # 找到最后一个完整的 ]
+                                end_idx = json_str.rfind(']')
+                                if end_idx > start_idx:
+                                    entities_part = json_str[start_idx:end_idx+1]
+                                    try:
+                                        entities_list = json.loads('[' + entities_part + ']')
+                                        result = {"entities": entities_list}
+                                        logger.info(f"Successfully extracted {len(entities_list)} entities using array extraction")
+                                    except:
+                                        result = {"entities": []}
+                                else:
+                                    result = {"entities": []}
+                            else:
+                                result = {"entities": []}
+                                logger.warning("Could not find entities array in JSON")
+                    else:
+                        # 2. 如果找不到JSON，尝试手动构建
+                        logger.warning("Could not find JSON in response, creating empty result")
+                        result = {"entities": []}
+                except Exception as repair_error:
+                    logger.error(f"Could not recover JSON from response: {repair_error}")
+                    # 返回空结果而不是失败
+                    result = {"entities": []}
             entities = self._parse_entities(result, chunk_ids[0] if chunk_ids else None)
             
             # 将所有 chunk_ids 添加到实体的 source_chunks

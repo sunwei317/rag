@@ -9,7 +9,8 @@ import json
 import time
 from pathlib import Path
 
-BASE_URL = "http://localhost:8000"
+from config.settings import settings
+BASE_URL = f"http://{getattr(settings, 'api_host', 'localhost')}:{getattr(settings, 'api_port', 8000)}"
 
 def print_section(title):
     print(f"\n{'='*60}")

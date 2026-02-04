@@ -916,20 +916,7 @@
                     body: formData
                 });
 
-                let result = null;
-                let errorText = '';
-                const contentType = response.headers.get('content-type') || '';
-                if (contentType.includes('application/json')) {
-                    result = await response.json();
-                } else {
-                    const rawText = await response.text();
-                    try {
-                        result = JSON.parse(rawText);
-                    } catch (parseError) {
-                        errorText = rawText;
-                    }
-                }
-
+                const result = await response.json();
                 const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
                 if (response.ok) {
@@ -969,8 +956,7 @@
                         }
                     }
                 } else {
-                    const detail = (result && (result.detail || result.message)) || errorText || `HTTP ${response.status}`;
-                    showStatus('upload-status', `❌ Upload failed: ${detail}`, 'error');
+                    showStatus('upload-status', `❌ Upload failed: ${result.detail || 'Unknown error'}`, 'error');
                 }
             } catch (error) {
                 showStatus('upload-status', `❌ Network error: ${error.message}`, 'error');
@@ -1115,14 +1101,13 @@
                 });
 
                 // Separate citation area and main content
-                const citationMarker = '<div class="citations">';
-                const citationIndex = content.lastIndexOf(citationMarker);
+                const citationsMatch = content.match(/<div class="citations">[\\s\\S]*<\\/div>$/);
                 let mainContent = content;
                 let citations = '';
 
-                if (citationIndex !== -1) {
-                    mainContent = content.slice(0, citationIndex);
-                    citations = content.slice(citationIndex);
+                if (citationsMatch) {
+                    mainContent = content.replace(citationsMatch[0], '');
+                    citations = citationsMatch[0];
                 }
 
                 // Render Markdown main content

@@ -108,7 +108,7 @@ class Relation:
 
 
 # LLM 关系抽取 Prompt
-RELATION_EXTRACTION_PROMPT = """你是一个技术文档关系抽取专家。请分析以下实体，结合文档上下文，抽取它们之间的关系。
+RELATION_EXTRACTION_PROMPT = """你是一个技术文档关系抽取专家。请分析以下实体，结合文档上下文，尽可能多地抽取它们之间的关系。
 
 文档内容:
 {content}
@@ -116,21 +116,21 @@ RELATION_EXTRACTION_PROMPT = """你是一个技术文档关系抽取专家。请
 已识别的实体:
 {entities}
 
-请抽取实体之间的关系，支持的关系类型:
-1. depends_on - A 依赖 B (如: MySQL 依赖 JDK)
-2. requires - A 需要 B 才能运行/安装
-3. belongs_to - A 属于 B (如: API 属于模块)
-4. contains - A 包含 B
-5. references - A 引用 B
-6. configures - A 配置项影响 B 组件
-7. affects - A 影响 B 的行为
-8. supersedes - A 版本替代 B 版本
-9. compatible_with - A 兼容 B
-10. related_to - A 与 B 相关 (通用关系)
-11. implements - A 实现 B (接口)
-12. extends - A 扩展 B
-13. calls - A 调用 B
-14. uses - A 使用 B
+请尽可能多地抽取实体之间的关系，支持的关系类型:
+1. depends_on - A 依赖 B (如: MySQL 依赖 JDK, 应用依赖数据库)
+2. requires - A 需要 B 才能运行/安装 (如: 功能需要配置项)
+3. belongs_to - A 属于 B (如: API 属于模块, 配置项属于组件)
+4. contains - A 包含 B (如: 模块包含API, 产品包含功能)
+5. references - A 引用 B (如: 文档引用概念, API引用类型)
+6. configures - A 配置项影响 B 组件 (如: max_connections配置数据库)
+7. affects - A 影响 B 的行为 (如: 版本影响功能, 配置影响性能)
+8. supersedes - A 版本替代 B 版本 (如: v2.0替代v1.0)
+9. compatible_with - A 兼容 B (如: 版本兼容性)
+10. related_to - A 与 B 相关 (通用关系，用于任何相关但不确定类型的关系)
+11. implements - A 实现 B (接口) (如: 类实现接口)
+12. extends - A 扩展 B (如: 功能扩展基础功能)
+13. calls - A 调用 B (如: API调用服务, 函数调用函数)
+14. uses - A 使用 B (如: 应用使用数据库, 功能使用API)
 
 请以 JSON 格式输出:
 ```json
@@ -147,10 +147,13 @@ RELATION_EXTRACTION_PROMPT = """你是一个技术文档关系抽取专家。请
 }}
 ```
 
-注意:
-- 只抽取文档中明确表达的关系
-- confidence 表示关系的确定程度 (0.0-1.0)
+重要提示:
+- 尽可能多地抽取关系，包括所有明确和隐含的关系
+- 如果两个实体在同一段文字中出现，很可能存在关系（如related_to）
+- confidence 表示关系的确定程度 (0.0-1.0)，即使不确定也可以设为0.3-0.5
 - 关系应该有明确的方向性
+- 不要遗漏常见的关系：如产品使用技术、API属于产品、配置影响功能等
+- 如果实体A和B在同一句话或段落中，尝试找出它们的关系
 
 输出:"""
 
@@ -168,20 +171,33 @@ class RelationBuilder:
     def __init__(
         self,
         llm_client=None,
-        model: str = "gpt-4.1-mini",
-        min_confidence: float = 0.5,
-        use_cooccurrence: bool = False,  # 默认关闭共现关系（减少数量）
-        cooccurrence_threshold: int = 5,  # 提高共现阈值
-        use_core_relations_only: bool = True,  # 只使用核心关系类型
-        max_relations_per_chunk: int = 10  # 每个 chunk 最多关系数
+        model: Optional[str] = None,  # None 时使用配置中的模型
+        min_confidence: Optional[float] = None,
+        use_cooccurrence: Optional[bool] = None,
+        cooccurrence_threshold: Optional[int] = None,
+        use_core_relations_only: Optional[bool] = None,
+        max_relations_per_chunk: Optional[int] = None
     ):
         self.llm_client = llm_client
+        # 如果未指定模型，将在 _init_llm_client 中从配置读取
         self.model = model
-        self.min_confidence = min_confidence
-        self.use_cooccurrence = use_cooccurrence
-        self.cooccurrence_threshold = cooccurrence_threshold
-        self.use_core_relations_only = use_core_relations_only
-        self.max_relations_per_chunk = max_relations_per_chunk
+        
+        # 从 settings 加载 Graph RAG 配置（如果可用）
+        try:
+            from config.settings import settings
+            # 使用传入参数或 settings 配置，都有默认值回退
+            self.min_confidence = min_confidence or (settings.graph.get('relation_min_confidence') if settings.graph else None) or 0.3
+            self.use_cooccurrence = use_cooccurrence if use_cooccurrence is not None else (settings.graph.get('use_cooccurrence') if settings.graph else None) or False
+            self.cooccurrence_threshold = cooccurrence_threshold or (settings.graph.get('cooccurrence_threshold') if settings.graph else None) or 3
+            self.use_core_relations_only = use_core_relations_only if use_core_relations_only is not None else (settings.graph.get('use_core_relations_only') if settings.graph else None) or True
+            self.max_relations_per_chunk = max_relations_per_chunk or (settings.graph.get('relation_max_per_chunk') if settings.graph else None) or 20
+        except (ImportError, AttributeError):
+            # 如果 settings 不可用，使用默认值
+            self.min_confidence = min_confidence or 0.3
+            self.use_cooccurrence = use_cooccurrence if use_cooccurrence is not None else False
+            self.cooccurrence_threshold = cooccurrence_threshold or 3
+            self.use_core_relations_only = use_core_relations_only if use_core_relations_only is not None else True
+            self.max_relations_per_chunk = max_relations_per_chunk or 20
         
         self._init_llm_client()
         
@@ -190,13 +206,32 @@ class RelationBuilder:
     
     def _init_llm_client(self):
         """初始化 LLM 客户端"""
-        if self.llm_client is None:
-            try:
-                from openai import OpenAI
-                import os
-                self.llm_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            except Exception as e:
-                logger.warning(f"Failed to init OpenAI client: {e}")
+        if self.llm_client is not None:
+            return
+        try:
+            from openai import OpenAI
+            from config.settings import settings
+            
+            # 优先使用本地 LLM 服务 (OpenAI 兼容 API)
+            if settings.llm.writing_provider == "local":
+                self.llm_client = OpenAI(
+                    api_key="EMPTY",  # 本地服务通常不校验 key
+                    base_url=settings.llm.local_api_base
+                )
+                self.model = settings.llm.local_model  # 使用配置的本地模型
+            elif settings.llm.writing_provider == "openai":
+                self.llm_client = OpenAI(
+                    api_key=settings.llm.openai_api_key
+                )
+                self.model = settings.llm.writing_model
+            else:
+                raise ValueError(f"Unsupported LLM provider: {settings.llm.writing_provider}")
+            
+            logger.info(f"RelationBuilder initialized LLM client: provider={settings.llm.writing_provider}, model={self.model}")
+        except Exception as e:
+            logger.error(f"Failed to init LLM client for RelationBuilder: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def build_relations(
         self,
@@ -320,10 +355,10 @@ class RelationBuilder:
             return []
         
         try:
-            # 构建实体描述
+            # 构建实体描述（增加数量以看到更多实体）
             entity_desc = "\n".join([
                 f"- {e.name} ({e.entity_type.value}): {e.description}"
-                for e in entities[:20]  # 限制数量
+                for e in entities[:50]  # 增加数量（从20提高到50）
             ])
             
             response = self.llm_client.chat.completions.create(
@@ -336,16 +371,41 @@ class RelationBuilder:
                     {
                         "role": "user",
                         "content": RELATION_EXTRACTION_PROMPT.format(
-                            content=content[:3000],
+                            content=content[:5000],  # 增加内容长度（从3000提高到5000）
                             entities=entity_desc
                         )
                     }
                 ],
                 temperature=0.1,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                max_tokens=4000
             )
-            
-            result = json.loads(response.choices[0].message.content)
+            if not response or not response.choices:
+                logger.warning("Relation extraction returned empty response")
+                return []
+
+            message = response.choices[0].message
+            raw_content = getattr(message, "content", None)
+            if not raw_content:
+                logger.warning("Relation extraction returned empty content")
+                return []
+
+            try:
+                result = json.loads(raw_content)
+            except Exception:
+                # 尝试从文本中恢复 JSON
+                start = raw_content.find("{")
+                end = raw_content.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    try:
+                        result = json.loads(raw_content[start:end + 1])
+                    except Exception as inner_error:
+                        logger.error(f"Relation extraction JSON recovery failed: {inner_error}")
+                        return []
+                else:
+                    logger.error("Relation extraction JSON not found in response")
+                    return []
+
             return self._parse_relations(result, chunk_id)
             
         except Exception as e:

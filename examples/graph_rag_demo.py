@@ -51,7 +51,8 @@ def demo_entity_extraction():
         print(f"  - {entity.name} ({entity.entity_type.value})")
     
     # 如果配置了 OpenAI API，使用 LLM 抽取
-    if os.getenv("OPENAI_API_KEY"):
+    from config.settings import settings
+    if settings.llm.openai_api_key:
         print("\n使用 LLM 抽取的实体:")
         entities = extractor.extract_from_text(sample_text, chunk_id="demo_chunk_1")
         for entity in entities:
@@ -151,7 +152,8 @@ def demo_graph_rag():
     print("4. Graph RAG 完整示例")
     print("="*60)
     
-    if not os.getenv("OPENAI_API_KEY"):
+    from config.settings import settings
+    if not settings.llm.openai_api_key:
         print("\n[跳过] 需要设置 OPENAI_API_KEY 环境变量")
         return
     
@@ -210,7 +212,7 @@ def demo_graph_rag():
     # 2. 创建 Graph RAG
     graph_rag = GraphRAG(
         graph_store=graph_store,
-        model="gpt-4.1-mini"
+        model=settings.llm.local_model
     )
     
     # 3. 执行查询

@@ -10,6 +10,8 @@ from loguru import logger
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
+from config.settings import settings
+
 
 @dataclass
 class Reference:
@@ -77,7 +79,7 @@ class RAGChat:
         reranker=None,
         query_transformer=None,
         llm_client=None,
-        model: str = "gpt-oss-20b",
+        model: str = None,  # 从 settings 获取
         parent_chunk_store=None,  # 用于获取父 Chunk
         window_size: int = 2,  # 上下文窗口大小
         # Graph RAG 相关参数
@@ -92,7 +94,7 @@ class RAGChat:
         self.reranker = reranker
         self.query_transformer = query_transformer
         self.llm_client = llm_client
-        self.model = model
+        self.model = model or settings.llm.local_model
         self.parent_chunk_store = parent_chunk_store
         self.window_size = window_size
         
@@ -101,9 +103,9 @@ class RAGChat:
         self.use_graph_context = use_graph_context
         self.graph_context_weight = graph_context_weight
         
-        # 本地 LLM 配置
-        self.local_api_base = local_api_base
-        self.local_model = local_model
+        # 本地 LLM 配置 - 优先使用传入参数，否则从 settings 获取
+        self.local_api_base = local_api_base or settings.llm.local_api_base
+        self.local_model = local_model or settings.llm.local_model
         
         self._init_llm_client()
     
@@ -528,6 +530,9 @@ class RAGChat:
         final_references = references
         if "未找到" in answer or "没有相关信息" in answer or "无法找到" in answer:
             final_references = []
+        else:
+            # 过滤出答案中实际引用的参考文献
+            final_references = self._filter_cited_references(answer, references)
         
         return ChatResponse(
             answer=answer,
@@ -602,7 +607,48 @@ class RAGChat:
         except Exception as e:
             logger.error(f"Failed to generate answer: {e}")
             return f"生成答案时出错: {str(e)}"
-    
+
+    def _filter_cited_references(self, answer: str, all_references: List[Reference]) -> List[Reference]:
+        """
+        根据答案中的引用标记过滤参考文献
+
+        Args:
+            answer: 生成的答案文本
+            all_references: 所有检索到的参考文献
+
+        Returns:
+            过滤后的参考文献列表，仅包含答案中引用的文献
+        """
+        import re
+
+        # 查找答案中所有的引用标记，例如 [来源 1]、[来源1]、[来源 2]、[来源2] 等
+        citation_pattern = r'\[来源\s*(\d+)\]|\[来源(\d+)\]'
+        matches = re.findall(citation_pattern, answer)
+
+        # Extract the numbers from matches (each match is a tuple of (group1, group2))
+        cited_numbers = []
+        for match in matches:
+            # match is a tuple like ('1', '') or ('', '2'), so we take the non-empty element
+            for group in match:
+                if group and group.isdigit():
+                    cited_numbers.append(group)
+
+        # 转换为整数并去重
+        cited_indices = set(int(num) for num in cited_numbers if num.isdigit())
+
+        # 过滤出被引用的参考文献
+        filtered_references = []
+        for idx in sorted(cited_indices):
+            # 索引从1开始，所以需要减1来匹配数组索引
+            if 1 <= idx <= len(all_references):
+                filtered_references.append(all_references[idx - 1])
+
+        # 如果没有找到引用标记，返回所有参考文献
+        if not cited_indices:
+            return all_references
+
+        return filtered_references
+
     def ask_stream(
         self,
         question: str,

@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from loguru import logger
 from collections import defaultdict
 
+from config.settings import settings
+
 
 @dataclass
 class DataSection:
@@ -29,7 +31,7 @@ class DataSection:
         return f"{prefix} {self.title}\n\n{self.content}"
 
 
-@dataclass 
+@dataclass
 class DataDrivenDocument:
     """数据驱动生成的文档"""
     title: str
@@ -37,22 +39,32 @@ class DataDrivenDocument:
     entity_count: int
     relation_count: int
     chunk_count: int
+    source_documents: List[Dict] = field(default_factory=list)  # 添加源文档信息
     
     def to_markdown(self) -> str:
         lines = [f"# {self.title}", ""]
-        
+
         for section in self.sections:
             lines.append(section.to_markdown())
             lines.append("")
-        
+
         # 添加数据来源说明
         lines.append("---")
         lines.append("## 数据来源")
         lines.append("")
-        lines.append(f"- 实体数量: {self.entity_count}")
-        lines.append(f"- 关系数量: {self.relation_count}")
-        lines.append(f"- 文档片段数量: {self.chunk_count}")
-        
+
+        if self.source_documents:
+            lines.append("### 源文档列表")
+            for i, doc in enumerate(self.source_documents, 1):
+                doc_title = doc.get('title', doc.get('doc_title', '未知文档'))
+                doc_id = doc.get('doc_id', 'N/A')
+                chunk_count = doc.get('chunk_count', 0)
+                lines.append(f"{i}. **{doc_title}** (ID: {doc_id}, 片段数: {chunk_count})")
+        else:
+            lines.append(f"- 实体数量: {self.entity_count}")
+            lines.append(f"- 关系数量: {self.relation_count}")
+            lines.append(f"- 文档片段数量: {self.chunk_count}")
+
         return "\n".join(lines)
     
     def to_dict(self) -> Dict:
@@ -119,7 +131,7 @@ class DataDrivenWriter:
         graph_store=None,
         vector_store=None,
         llm_client=None,
-        model: str = "gpt-oss-20b",
+        model: str = None,
         # 文档长度控制
         max_entities_per_type: Optional[int] = None,
         max_sections: Optional[int] = None,
@@ -135,9 +147,9 @@ class DataDrivenWriter:
         self.graph_store = graph_store
         self.vector_store = vector_store
         self.llm_client = llm_client
-        self.model = model
-        self.local_api_base = local_api_base
-        self.local_model = local_model
+        self.model = model or settings.llm.local_model
+        self.local_api_base = local_api_base or settings.llm.local_api_base
+        self.local_model = local_model or settings.llm.local_model
         
         # 获取细节级别配置
         self.detail_config = self.DETAIL_CONFIGS.get(detail_level, self.DETAIL_CONFIGS["standard"]).copy()
@@ -236,19 +248,27 @@ class DataDrivenWriter:
             sections = self._generate_api_reference_sections(organized_data)
         elif doc_type == "user_manual":
             sections = self._generate_user_manual_sections(organized_data)
-        else:
+        elif doc_type == "installation_guide":
+            sections = self._generate_installation_guide_sections(organized_data)
+        elif doc_type == "troubleshooting":
+            sections = self._generate_troubleshooting_guide_sections(organized_data)
+        else:  # general or any other type
             sections = self._generate_general_sections(organized_data)
         
         # 5. 生成文档标题
         if not title:
             title = self._generate_title(organized_data, doc_type)
         
+        # 收集源文档信息
+        source_docs_info = self._get_source_documents_info(chunks_data)
+
         return DataDrivenDocument(
             title=title,
             sections=sections,
             entity_count=len(entities_data),
             relation_count=len(relations_data),
-            chunk_count=len(chunks_data)
+            chunk_count=len(chunks_data),
+            source_documents=source_docs_info
         )
     
     def _get_all_entities(self, entity_types: Optional[List[str]] = None) -> List[Dict]:
@@ -592,7 +612,143 @@ class DataDrivenWriter:
             add_section(self._generate_relations_section(data["relations_by_type"]))
         
         return sections
-    
+
+    def _generate_installation_guide_sections(self, data: Dict) -> List[DataSection]:
+        """生成安装指南文档结构"""
+        sections = []
+        config = data.get("config", self.detail_config)
+        max_sections = config.get("max_sections")
+        include_relations = config.get("include_relations", True)
+
+        def add_section(section):
+            """添加章节，检查数量限制"""
+            if max_sections is None or len(sections) < max_sections:
+                sections.append(section)
+                return True
+            return False
+
+        # 1. 安装前准备
+        prerequisites = data["entities_by_type"].get("requirement", []) + \
+                       data["entities_by_type"].get("dependency", []) + \
+                       data["entities_by_type"].get("config", [])
+
+        if prerequisites:
+            if not add_section(self._generate_entity_section(
+                "安装前准备", prerequisites, 1, config
+            )):
+                return sections
+
+        # 2. 系统要求
+        system_reqs = data["entities_by_type"].get("platform", []) + \
+                      data["entities_by_type"].get("version", [])
+
+        if system_reqs:
+            if not add_section(self._generate_entity_section(
+                "系统要求", system_reqs, 1, config
+            )):
+                return sections
+
+        # 3. 安装步骤
+        install_steps = data["entities_by_type"].get("command", []) + \
+                        data["entities_by_type"].get("api", [])
+
+        if install_steps:
+            if not add_section(self._generate_entity_section(
+                "安装步骤", install_steps, 1, config
+            )):
+                return sections
+
+        # 4. 配置说明
+        configs = data["entities_by_type"].get("config", [])
+        if configs:
+            if not add_section(self._generate_entity_section(
+                "配置说明", configs, 1, config
+            )):
+                return sections
+
+        # 5. 验证安装
+        verification = data["entities_by_type"].get("command", []) + \
+                       data["entities_by_type"].get("api", [])
+        if verification:
+            if not add_section(self._generate_entity_section(
+                "验证安装", verification, 1, config
+            )):
+                return sections
+
+        # 如果没有特定的安装相关实体，使用通用结构
+        if not sections:
+            return self._generate_general_sections(data)
+
+        return sections
+
+    def _generate_troubleshooting_guide_sections(self, data: Dict) -> List[DataSection]:
+        """生成故障排除指南文档结构"""
+        sections = []
+        config = data.get("config", self.detail_config)
+        max_sections = config.get("max_sections")
+        include_relations = config.get("include_relations", True)
+
+        def add_section(section):
+            """添加章节，检查数量限制"""
+            if max_sections is None or len(sections) < max_sections:
+                sections.append(section)
+                return True
+            return False
+
+        # 1. 常见问题
+        common_issues = data["entities_by_type"].get("error", []) + \
+                        data["entities_by_type"].get("problem", [])
+
+        if common_issues:
+            if not add_section(self._generate_entity_section(
+                "常见问题", common_issues, 1, config
+            )):
+                return sections
+
+        # 2. 错误代码
+        error_codes = data["entities_by_type"].get("error", [])
+        if error_codes:
+            if not add_section(self._generate_entity_section(
+                "错误代码", error_codes, 1, config
+            )):
+                return sections
+
+        # 3. 解决方案
+        solutions = data["entities_by_type"].get("solution", []) + \
+                    data["entities_by_type"].get("command", [])
+
+        if solutions:
+            if not add_section(self._generate_entity_section(
+                "解决方案", solutions, 1, config
+            )):
+                return sections
+
+        # 4. 诊断工具
+        tools = data["entities_by_type"].get("tool", []) + \
+                data["entities_by_type"].get("command", [])
+
+        if tools:
+            if not add_section(self._generate_entity_section(
+                "诊断工具", tools, 1, config
+            )):
+                return sections
+
+        # 5. 日志分析
+        logs = data["entities_by_type"].get("log", []) + \
+               data["entities_by_type"].get("config", [])
+
+        if logs:
+            if not add_section(self._generate_entity_section(
+                "日志分析", logs, 1, config
+            )):
+                return sections
+
+        # 如果没有特定的故障排除相关实体，使用通用结构
+        if not sections:
+            return self._generate_general_sections(data)
+
+        return sections
+
     def _generate_overview_section(self, data: Dict) -> Optional[DataSection]:
         """生成概述章节"""
         # 从 chunks 中提取概述内容
@@ -746,7 +902,8 @@ class DataDrivenWriter:
         self,
         doc_id: Optional[str] = None,
         doc_type: str = "api_reference",
-        title: Optional[str] = None
+        title: Optional[str] = None,
+        max_sections: Optional[int] = None
     ) -> DataDrivenDocument:
         """
         使用 LLM 格式化数据库内容（不添加新信息）
@@ -768,44 +925,289 @@ class DataDrivenWriter:
                 sections=[DataSection("提示", 1, "数据库中没有找到数据。请先上传文档。")],
                 entity_count=0,
                 relation_count=0,
-                chunk_count=0
+                chunk_count=0,
+                source_documents=[]
             )
         
         # 准备数据摘要给 LLM
-        data_summary = self._prepare_data_summary(entities_data, relations_data, chunks_data)
+        data_summary = self._prepare_data_summary(entities_data, relations_data, chunks_data, doc_type)
         
         # 使用 LLM 生成格式化文档
         formatted_content = self._format_with_llm(data_summary, doc_type)
         
         # 解析 LLM 输出
         sections = self._parse_llm_output(formatted_content)
-        
+
+        # 应用最大章节数限制
+        if max_sections is not None and len(sections) > max_sections:
+            sections = sections[:max_sections]
+
         if not title:
             title = self._extract_title_from_data(entities_data, doc_type)
-        
+
+        # 收集源文档信息
+        source_docs_info = self._get_source_documents_info(chunks_data)
+
         return DataDrivenDocument(
             title=title,
             sections=sections,
             entity_count=len(entities_data),
             relation_count=len(relations_data),
-            chunk_count=len(chunks_data)
+            chunk_count=len(chunks_data),
+            source_documents=source_docs_info
         )
     
+    def _get_source_documents_info(self, chunks: List[Dict]) -> List[Dict]:
+        """获取源文档信息"""
+        doc_info_map = {}
+
+        for chunk in chunks:
+            doc_id = "unknown"
+            doc_title = "未知文档"
+
+            # 确保 chunk 是字典类型
+            if isinstance(chunk, dict):
+                # 尝试从不同的可能位置获取文档ID和标题
+                metadata = chunk.get("metadata", {})
+
+                # 确保 metadata 是字典类型
+                if isinstance(metadata, dict):
+                    doc_id = metadata.get("doc_id") or chunk.get("doc_id", "unknown")
+                    doc_title = metadata.get("doc_title") or chunk.get("doc_title", f"文档_{doc_id}")
+                else:
+                    # 如果 metadata 不是字典，尝试直接从 chunk 获取
+                    doc_id = chunk.get("doc_id", "unknown")
+                    doc_title = chunk.get("doc_title", f"文档_{doc_id}")
+            elif isinstance(chunk, str):
+                # 如果 chunk 是字符串，跳过或使用默认值
+                pass
+            else:
+                # 其他类型也使用默认值
+                pass
+
+            if doc_id not in doc_info_map:
+                doc_info_map[doc_id] = {
+                    "doc_id": doc_id,
+                    "title": doc_title,
+                    "chunk_count": 0
+                }
+
+            doc_info_map[doc_id]["chunk_count"] += 1
+
+        # 返回按文档ID排序的列表
+        return sorted(doc_info_map.values(), key=lambda x: x["title"])
+
     def _prepare_data_summary(
+        self,
+        entities: List[Dict],
+        relations: List[Dict],
+        chunks: List[Dict],
+        doc_type: str = "general"
+    ) -> str:
+        """准备数据摘要，根据文档类型定制内容"""
+        # 根据文档类型定制数据摘要
+        if doc_type == "api_reference":
+            return self._prepare_api_reference_summary(entities, relations, chunks)
+        elif doc_type == "user_manual":
+            return self._prepare_user_manual_summary(entities, relations, chunks)
+        elif doc_type == "installation_guide":
+            return self._prepare_installation_guide_summary(entities, relations, chunks)
+        elif doc_type == "troubleshooting":
+            return self._prepare_troubleshooting_summary(entities, relations, chunks)
+        else:
+            return self._prepare_general_summary(entities, relations, chunks)
+
+    def _prepare_api_reference_summary(
         self,
         entities: List[Dict],
         relations: List[Dict],
         chunks: List[Dict]
     ) -> str:
-        """准备数据摘要"""
+        """准备 API 参考文档的数据摘要"""
+        lines = ["# API 参考文档数据", ""]
+
+        # API 实体
+        api_entities = [e for e in entities if e.get("type") in ["api", "endpoint", "method"]]
+        if api_entities:
+            lines.append("## API 接口列表")
+            for e in api_entities:
+                name = e.get("name", "")
+                desc = e.get("description", "")
+                lines.append(f"- {name}: {desc}")
+
+        # 配置实体
+        config_entities = [e for e in entities if e.get("type") in ["config", "setting", "parameter"]]
+        if config_entities:
+            lines.append("\n## 配置参数")
+            for e in config_entities:
+                name = e.get("name", "")
+                desc = e.get("description", "")
+                lines.append(f"- {name}: {desc}")
+
+        # 命令实体
+        command_entities = [e for e in entities if e.get("type") in ["command", "method", "function"]]
+        if command_entities:
+            lines.append("\n## 命令方法")
+            for e in command_entities:
+                name = e.get("name", "")
+                desc = e.get("description", "")
+                lines.append(f"- {name}: {desc}")
+
+        # 关系数据
+        if relations:
+            lines.append("\n## API 关系")
+            for r in relations[:50]:
+                lines.append(f"- {r.get('source', '')} --[{r.get('relation_type', '')}]--> {r.get('target', '')}")
+
+        return "\n".join(lines)
+
+    def _prepare_user_manual_summary(
+        self,
+        entities: List[Dict],
+        relations: List[Dict],
+        chunks: List[Dict]
+    ) -> str:
+        """准备用户手册的数据摘要"""
+        lines = ["# 用户手册数据", ""]
+
+        # 产品/功能实体
+        product_entities = [e for e in entities if e.get("type") in ["product", "feature", "function"]]
+        if product_entities:
+            lines.append("## 产品功能")
+            for e in product_entities:
+                name = e.get("name", "")
+                desc = e.get("description", "")
+                lines.append(f"- {name}: {desc}")
+
+        # 操作/命令实体
+        command_entities = [e for e in entities if e.get("type") in ["command", "action", "operation"]]
+        if command_entities:
+            lines.append("\n## 操作方法")
+            for e in command_entities:
+                name = e.get("name", "")
+                desc = e.get("description", "")
+                lines.append(f"- {name}: {desc}")
+
+        # 概念实体
+        concept_entities = [e for e in entities if e.get("type") in ["concept", "term", "definition"]]
+        if concept_entities:
+            lines.append("\n## 术语定义")
+            for e in concept_entities:
+                name = e.get("name", "")
+                desc = e.get("description", "")
+                lines.append(f"- {name}: {desc}")
+
+        # 关系数据
+        if relations:
+            lines.append("\n## 功能关系")
+            for r in relations[:50]:
+                lines.append(f"- {r.get('source', '')} --[{r.get('relation_type', '')}]--> {r.get('target', '')}")
+
+        return "\n".join(lines)
+
+    def _prepare_installation_guide_summary(
+        self,
+        entities: List[Dict],
+        relations: List[Dict],
+        chunks: List[Dict]
+    ) -> str:
+        """准备安装指南的数据摘要"""
+        lines = ["# 安装指南数据", ""]
+
+        # 系统要求实体
+        requirement_entities = [e for e in entities if e.get("type") in ["requirement", "dependency", "config"]]
+        if requirement_entities:
+            lines.append("## 系统要求")
+            for e in requirement_entities:
+                name = e.get("name", "")
+                desc = e.get("description", "")
+                lines.append(f"- {name}: {desc}")
+
+        # 平台/版本实体
+        platform_entities = [e for e in entities if e.get("type") in ["platform", "version", "os"]]
+        if platform_entities:
+            lines.append("\n## 支持平台")
+            for e in platform_entities:
+                name = e.get("name", "")
+                desc = e.get("description", "")
+                lines.append(f"- {name}: {desc}")
+
+        # 命令/安装步骤实体
+        install_entities = [e for e in entities if e.get("type") in ["command", "api", "step"]]
+        if install_entities:
+            lines.append("\n## 安装步骤")
+            for e in install_entities:
+                name = e.get("name", "")
+                desc = e.get("description", "")
+                lines.append(f"- {name}: {desc}")
+
+        # 关系数据
+        if relations:
+            lines.append("\n## 安装依赖关系")
+            for r in relations[:50]:
+                lines.append(f"- {r.get('source', '')} --[{r.get('relation_type', '')}]--> {r.get('target', '')}")
+
+        return "\n".join(lines)
+
+    def _prepare_troubleshooting_summary(
+        self,
+        entities: List[Dict],
+        relations: List[Dict],
+        chunks: List[Dict]
+    ) -> str:
+        """准备故障排除指南的数据摘要"""
+        lines = ["# 故障排除指南数据", ""]
+
+        # 错误/问题实体
+        error_entities = [e for e in entities if e.get("type") in ["error", "problem", "issue"]]
+        if error_entities:
+            lines.append("## 常见问题")
+            for e in error_entities:
+                name = e.get("name", "")
+                desc = e.get("description", "")
+                lines.append(f"- {name}: {desc}")
+
+        # 解决方案实体
+        solution_entities = [e for e in entities if e.get("type") in ["solution", "fix", "workaround"]]
+        if solution_entities:
+            lines.append("\n## 解决方案")
+            for e in solution_entities:
+                name = e.get("name", "")
+                desc = e.get("description", "")
+                lines.append(f"- {name}: {desc}")
+
+        # 工具/命令实体
+        tool_entities = [e for e in entities if e.get("type") in ["tool", "command", "diagnostic"]]
+        if tool_entities:
+            lines.append("\n## 诊断工具")
+            for e in tool_entities:
+                name = e.get("name", "")
+                desc = e.get("description", "")
+                lines.append(f"- {name}: {desc}")
+
+        # 关系数据
+        if relations:
+            lines.append("\n## 问题关系")
+            for r in relations[:50]:
+                lines.append(f"- {r.get('source', '')} --[{r.get('relation_type', '')}]--> {r.get('target', '')}")
+
+        return "\n".join(lines)
+
+    def _prepare_general_summary(
+        self,
+        entities: List[Dict],
+        relations: List[Dict],
+        chunks: List[Dict]
+    ) -> str:
+        """准备通用技术文档的数据摘要"""
         lines = ["# 数据库中的数据", ""]
-        
+
         # 实体数据
         lines.append("## 实体列表")
         entities_by_type = defaultdict(list)
         for e in entities:
             entities_by_type[e.get("type", "concept")].append(e)
-        
+
         for etype, elist in entities_by_type.items():
             lines.append(f"\n### {etype} 类型:")
             for e in elist:
@@ -815,13 +1217,13 @@ class DataDrivenWriter:
                     lines.append(f"- {name}: {desc}")
                 else:
                     lines.append(f"- {name}")
-        
+
         # 关系数据
         if relations:
             lines.append("\n## 实体关系")
             for r in relations[:50]:  # 限制数量
                 lines.append(f"- {r.get('source', '')} --[{r.get('relation_type', '')}]--> {r.get('target', '')}")
-        
+
         # 文档内容摘要
         if chunks:
             lines.append("\n## 文档内容片段")
@@ -829,7 +1231,7 @@ class DataDrivenWriter:
                 content = chunk.get("content", "")[:500]  # 截断长内容
                 lines.append(f"\n### 片段 {i+1}")
                 lines.append(content)
-        
+
         return "\n".join(lines)
     
     def _format_with_llm(self, data_summary: str, doc_type: str) -> str:
@@ -837,7 +1239,18 @@ class DataDrivenWriter:
         if not self.llm_client:
             logger.warning("LLM client not available, using raw data")
             return data_summary
-        
+
+        # 根据文档类型提供不同的指导
+        doc_guidelines = {
+            "api_reference": "API参考文档应包含详细的接口说明、参数列表、返回值和使用示例。",
+            "user_manual": "用户手册应包含操作步骤、功能说明和使用指南，面向最终用户。",
+            "installation_guide": "安装指南应包含系统要求、安装步骤、配置说明和验证方法。",
+            "troubleshooting": "故障排除指南应包含常见问题、错误代码、解决方案和诊断方法。",
+            "general": "技术文档应全面介绍产品功能、架构和使用方法。"
+        }
+
+        guideline = doc_guidelines.get(doc_type, "技术文档应全面介绍相关内容。")
+
         prompt = f"""你是一个技术文档编辑。请将以下数据整理成一篇专业的{doc_type}技术文档。
 
 重要规则：
@@ -846,6 +1259,7 @@ class DataDrivenWriter:
 3. 如果数据不足以形成完整章节，就简短描述已有信息
 4. 保持信息的准确性，可以重新组织格式，但不能改变含义
 5. 使用 Markdown 格式输出
+6. {guideline}
 
 数据内容：
 {data_summary}
@@ -865,15 +1279,21 @@ class DataDrivenWriter:
             return response.choices[0].message.content
         except Exception as e:
             logger.error(f"LLM formatting failed: {e}")
-            return data_summary
+            # Ensure we return a string, even if data_summary is None
+            return data_summary or ""
     
     def _parse_llm_output(self, content: str) -> List[DataSection]:
         """解析 LLM 输出为章节"""
+        # Handle case where content is None
+        if content is None:
+            logger.warning("Content is None in _parse_llm_output, returning empty sections")
+            return []
+
         sections = []
         current_title = ""
         current_level = 1
         current_content = []
-        
+
         for line in content.split("\n"):
             # 检测标题
             if line.startswith("##"):

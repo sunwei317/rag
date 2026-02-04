@@ -160,9 +160,10 @@ def test_end_to_end_with_api():
     """测试通过 API 的端到端流程"""
     print_section("4. API 端到端测试")
     
+
     import requests
-    
-    base_url = "http://localhost:8000"
+    from config.settings import settings
+    base_url = f"http://{getattr(settings, 'api_host', 'localhost')}:{getattr(settings, 'api_port', 8000)}"
     
     # 检查服务状态
     try:

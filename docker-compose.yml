@@ -170,6 +170,38 @@ services:
       retries: 5
     # Neo4j 默认启动，无需 --profile
 
+  # ==================== Ollama 本地 LLM 服务 ====================
+  ollama:
+    container_name: ollama
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./data/ollama/models:/root/.ollama
+    networks:
+      - rag-network
+    profiles:
+      - llm
+
+  # ==================== LLM API 代理服务 (OpenAI兼容) ====================
+  llm-api-proxy:
+    container_name: llm-api-proxy
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api_proxy
+    ports:
+      - "8001:8001"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - MODEL_NAME=gpt-oss-20b
+    networks:
+      - rag-network
+    depends_on:
+      - ollama
+    profiles:
+      - llm
+
 networks:
   rag-network:
     driver: bridge

@@ -151,9 +151,28 @@ class GraphRetriever:
             try:
                 from openai import OpenAI
                 import os
-                self.llm_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+                # 优先使用本地 LLM 服务
+                local_api_base = os.getenv("LLM_LOCAL_API_BASE", "http://host.docker.internal:8001/v1")
+                local_model = os.getenv("LLM_LOCAL_MODEL", "gpt-oss-20b")
+
+                if local_api_base:
+                    self.llm_client = OpenAI(
+                        base_url=local_api_base,
+                        api_key="not-needed"  # 本地服务通常不需要 API key
+                    )
+                    self.model = local_model
+                    logger.info(f"GraphRetriever: Initialized Local LLM: {local_api_base}, model: {self.model}")
+                else:
+                    # 回退到 OpenAI
+                    api_key = os.getenv("OPENAI_API_KEY")
+                    if api_key and api_key != "sk-your-******-key":
+                        self.llm_client = OpenAI(api_key=api_key)
+                        logger.info("GraphRetriever: Initialized OpenAI LLM client")
+                    else:
+                        logger.warning("GraphRetriever: No valid LLM service configured")
             except Exception as e:
-                logger.warning(f"Failed to init OpenAI client: {e}")
+                logger.warning(f"GraphRetriever: Failed to init LLM client: {e}")
     
     def retrieve(
         self,

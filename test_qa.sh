@@ -2,7 +2,14 @@
 # RAG 系统问答测试脚本
 # 使用方法: ./test_qa.sh
 
-BASE_URL="http://localhost:8000"
+
+# 加载 .env 配置
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | grep -E 'API_HOST|API_PORT' | xargs)
+fi
+API_HOST=${API_HOST:-localhost}
+API_PORT=${API_PORT:-8000}
+BASE_URL="http://$API_HOST:$API_PORT"
 
 echo "============================================================"
 echo "  RAG 系统问答测试"

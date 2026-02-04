@@ -34,3 +34,36 @@ EXPOSE 8000
 
 # 启动命令
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# ==================== API Proxy Target ====================
+FROM python:3.11-slim as api_proxy
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    # WeasyPrint dependencies
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf-2.0-0 \
+    libffi-dev \
+    shared-mime-info \
+    # Chinese font support
+    fonts-noto-cjk \
+    fonts-wqy-microhei \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the API proxy script
+COPY llm_api_proxy.py .
+
+# Expose port for API proxy
+EXPOSE 8001
+
+# Start the API proxy
+CMD ["uvicorn", "llm_api_proxy:app", "--host", "0.0.0.0", "--port", "8001"]

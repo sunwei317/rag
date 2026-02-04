@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Frontend Click Test</title>
+</head>
+<body>
+    <div id="test-zone" style="padding: 20px; margin: 20px; border: 2px solid #ccc; cursor: pointer;">
+        Click here to select file
+    </div>
+    <input type="file" id="file-input" accept=".pdf" style="display: none;" />
+    
+    <p>File selected: <span id="status">No file</span></p>
+    
+    <script>
+        console.log('Test script loaded');
+        
+        const testZone = document.getElementById('test-zone');
+        const fileInput = document.getElementById('file-input');
+        const status = document.getElementById('status');
+        
+        // 点击测试
+        testZone.addEventListener('click', () => {
+            console.log('Click detected on test zone');
+            fileInput.click();
+        });
+        
+        // 文件选择测试
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                console.log('File selected:', e.target.files[0].name);
+                status.textContent = e.target.files[0].name;
+            }
+        });
+        
+        // 测试基本事件绑定
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM fully loaded');
+        });
+        
+        // 测试按钮是否存在
+        console.log('File input exists:', !!fileInput);
+        console.log('Test zone exists:', !!testZone);
+    </script>
+</body>
+</html>

@@ -48,13 +48,13 @@ class RAGEvaluator:
     
     def __init__(
         self,
-        llm_model: str = "gpt-4.1-mini",
-        embedding_model: str = "text-embedding-3-small"
+        llm_model: Optional[str] = None,
+        embedding_model: Optional[str] = None
     ):
-        self.llm_model = llm_model
-        self.embedding_model = embedding_model
+        from config.settings import settings
+        self.llm_model = llm_model or settings.llm.local_model
+        self.embedding_model = embedding_model or settings.embedding.model_name
         self._ragas_available = False
-        
         self._check_ragas()
     
     def _check_ragas(self):
