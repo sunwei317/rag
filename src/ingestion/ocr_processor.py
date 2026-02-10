@@ -4,6 +4,9 @@ OCR 处理模块
 """
 import os
 import tempfile
+import json
+import re
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
@@ -28,6 +31,7 @@ except ImportError:
 class OCRProvider(Enum):
     """OCR 提供商"""
     PADDLEOCR = "paddleocr"       # PaddleOCR + PPStructure
+    DOTS_OCR = "dots_ocr"         # Dots.ocr via vLLM OpenAI-compatible API
     AZURE = "azure"               # Azure Document Intelligence
     GOOGLE = "google"             # Google Document AI
     TESSERACT = "tesseract"       # Tesseract OCR (fallback)
@@ -112,6 +116,7 @@ class OCRDocumentResult:
     avg_confidence: float
     is_scanned: bool
     ocr_provider: str
+    temp_output_path: Optional[str] = None
 
 
 class OCRProcessor:
@@ -141,7 +146,10 @@ class OCRProcessor:
         enable_table_recognition: bool = True,
         enable_layout_analysis: bool = True,
         azure_endpoint: Optional[str] = None,
-        azure_key: Optional[str] = None
+        azure_key: Optional[str] = None,
+        dots_ocr_api_base: Optional[str] = None,
+        dots_ocr_model_name: Optional[str] = None,
+        dots_ocr_figure_cv_fallback: Optional[bool] = None
     ):
         self.provider = OCRProvider(provider)
         self.lang = lang
@@ -151,6 +159,16 @@ class OCRProcessor:
         self.enable_layout_analysis = enable_layout_analysis
         self.azure_endpoint = azure_endpoint or os.getenv("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT")
         self.azure_key = azure_key or os.getenv("AZURE_DOCUMENT_INTELLIGENCE_KEY")
+        self.dots_ocr_api_base = dots_ocr_api_base or os.getenv("DOTS_OCR_API_BASE", "http://dots-ocr-vllm:8000/v1")
+        self.dots_ocr_model_name = dots_ocr_model_name or os.getenv(
+            "DOTS_OCR_MODEL_NAME", "rednote-hilab/dots.ocr"
+        )
+        if dots_ocr_figure_cv_fallback is None:
+            self.dots_ocr_figure_cv_fallback = os.getenv(
+                "DOTS_OCR_FIGURE_CV_FALLBACK", "true"
+            ).strip().lower() in ("1", "true", "yes", "on")
+        else:
+            self.dots_ocr_figure_cv_fallback = bool(dots_ocr_figure_cv_fallback)
         
         self._ocr_engine = None
         self._table_engine = None
@@ -162,6 +180,8 @@ class OCRProcessor:
         """初始化 OCR 引擎"""
         if self.provider == OCRProvider.PADDLEOCR:
             self._init_paddleocr()
+        elif self.provider == OCRProvider.DOTS_OCR:
+            self._init_dots_ocr()
         elif self.provider == OCRProvider.AZURE:
             self._init_azure()
         elif self.provider == OCRProvider.TESSERACT:
@@ -169,6 +189,22 @@ class OCRProcessor:
         else:
             logger.warning(f"Provider {self.provider} not fully implemented, falling back to PaddleOCR")
             self._init_paddleocr()
+
+    def _init_dots_ocr(self):
+        """初始化 Dots.ocr (vLLM OpenAI 兼容接口)"""
+        try:
+            from openai import OpenAI
+            self._ocr_engine = OpenAI(
+                api_key=os.getenv("DOTS_OCR_API_KEY", "EMPTY"),
+                base_url=self.dots_ocr_api_base
+            )
+            logger.info(
+                f"Dots.ocr initialized: base={self.dots_ocr_api_base}, model={self.dots_ocr_model_name}, "
+                f"figure_cv_fallback={self.dots_ocr_figure_cv_fallback}"
+            )
+        except ImportError as e:
+            logger.error(f"openai package not installed for dots_ocr: {e}")
+            raise
     
     def _init_paddleocr(self):
         """初始化 PaddleOCR"""
@@ -281,13 +317,609 @@ class OCRProcessor:
         is_scanned = self.is_scanned_pdf(pdf_path)
         
         if self.provider == OCRProvider.PADDLEOCR:
-            return self._process_with_paddleocr(pdf_path, is_scanned)
+            result = self._process_with_paddleocr(pdf_path, is_scanned)
+        elif self.provider == OCRProvider.DOTS_OCR:
+            result = self._process_with_dots_ocr(pdf_path, is_scanned)
         elif self.provider == OCRProvider.AZURE:
-            return self._process_with_azure(pdf_path, is_scanned)
+            result = self._process_with_azure(pdf_path, is_scanned)
         elif self.provider == OCRProvider.TESSERACT:
-            return self._process_with_tesseract(pdf_path, is_scanned)
+            result = self._process_with_tesseract(pdf_path, is_scanned)
         else:
-            return self._process_with_paddleocr(pdf_path, is_scanned)
+            result = self._process_with_paddleocr(pdf_path, is_scanned)
+
+        temp_path = self._save_ocr_result_temp(pdf_path, result)
+        if temp_path:
+            result.temp_output_path = temp_path
+        return result
+
+    def _save_ocr_result_temp(self, pdf_path: str, result: OCRDocumentResult) -> Optional[str]:
+        """将 OCR 输出保存到宿主机可见目录中的 JSON 文件，便于排查问题"""
+        try:
+            output = {
+                "pdf_path": pdf_path,
+                "ocr_provider": result.ocr_provider,
+                "total_pages": result.total_pages,
+                "avg_confidence": result.avg_confidence,
+                "is_scanned": result.is_scanned,
+                "pages": []
+            }
+
+            for page in result.pages:
+                output["pages"].append({
+                    "page_num": page.page_num,
+                    "is_scanned": page.is_scanned,
+                    "confidence": page.confidence,
+                    "full_text": page.full_text,
+                    "text_blocks": [
+                        {
+                            "text": tb.text,
+                            "confidence": tb.confidence,
+                            "bbox": list(tb.bbox),
+                            "block_type": tb.block_type
+                        }
+                        for tb in page.text_blocks
+                    ],
+                    "tables": [
+                        {
+                            "cells": t.cells,
+                            "confidence": t.confidence,
+                            "bbox": list(t.bbox),
+                            "markdown": t.markdown,
+                            "html": t.html
+                        }
+                        for t in page.tables
+                    ],
+                    "figures": [
+                        {
+                            "image_path": f.image_path,
+                            "caption": f.caption,
+                            "bbox": list(f.bbox),
+                            "description": f.description
+                        }
+                        for f in page.figures
+                    ]
+                })
+
+            # 默认写入 /app/data，docker-compose 已映射到宿主机 ./data
+            output_dir = Path(os.getenv("OCR_OUTPUT_DIR", "/app/data/ocr_outputs"))
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            base_name = Path(pdf_path).stem
+            safe_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in base_name)[:80]
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            out_path = output_dir / f"ocr_output_{safe_name}_{ts}.json"
+
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(output, f, ensure_ascii=False, indent=2)
+            temp_path = str(out_path)
+
+            logger.info(f"OCR output saved to temp file: {temp_path}")
+            return temp_path
+        except Exception as e:
+            logger.warning(f"Failed to save OCR temp output: {e}")
+            return None
+
+    def _process_with_dots_ocr(self, pdf_path: str, is_scanned: bool) -> OCRDocumentResult:
+        """使用 Dots.ocr (vLLM) 处理"""
+        import fitz
+
+        doc = fitz.open(pdf_path)
+        pages = []
+        total_confidence = 0.0
+
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            pix = page.get_pixmap(dpi=300)
+            img_data = pix.tobytes("png")
+
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp.write(img_data)
+                tmp_path = tmp.name
+
+            try:
+                try:
+                    page_result = self._ocr_page_dots_ocr(tmp_path, page_num + 1)
+                except Exception as page_err:
+                    logger.error(f"Dots OCR page {page_num + 1} failed: {page_err}")
+                    page_result = OCRPageResult(
+                        page_num=page_num + 1,
+                        text_blocks=[],
+                        tables=[],
+                        figures=[],
+                        full_text="",
+                        confidence=0.0
+                    )
+                page_result.is_scanned = is_scanned
+                pages.append(page_result)
+                total_confidence += page_result.confidence
+            finally:
+                os.unlink(tmp_path)
+
+        doc.close()
+
+        avg_confidence = total_confidence / len(pages) if pages else 0.0
+        return OCRDocumentResult(
+            pages=pages,
+            total_pages=len(pages),
+            avg_confidence=avg_confidence,
+            is_scanned=is_scanned,
+            ocr_provider="dots_ocr"
+        )
+
+    def _ocr_page_dots_ocr(self, image_path: str, page_num: int) -> OCRPageResult:
+        """使用 Dots.ocr 处理单页（返回结构化版面结果）"""
+        with open(image_path, "rb") as f:
+            image_bytes = f.read()
+
+        import base64
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+        if HAS_PIL:
+            with Image.open(image_path) as img:
+                page_w, page_h = img.size
+        else:
+            page_w, page_h = 1000, 1000
+
+        prompt = f"""
+Perform OCR for this page and return STRICT JSON only.
+Page size: width={page_w}, height={page_h}.
+
+JSON schema:
+{{
+  "full_text": "string",
+  "text_blocks": [
+    {{
+      "text": "string",
+      "confidence": 0.0,
+      "bbox": [x1, y1, x2, y2],
+      "block_type": "text"
+    }}
+  ],
+  "tables": [
+    {{
+      "cells": [["h1","h2"],["v1","v2"]],
+      "markdown": "|...|",
+      "confidence": 0.0,
+      "bbox": [x1, y1, x2, y2]
+    }}
+  ],
+  "figures": [
+    {{
+      "caption": "string",
+      "description": "string",
+      "bbox": [x1, y1, x2, y2]
+    }}
+  ]
+}}
+
+Rules:
+- bbox must use absolute pixel coordinates.
+- Keep reading order in text_blocks.
+- If no table/figure, use empty list.
+- Return JSON only, no markdown/code fence.
+"""
+
+        response = self._ocr_engine.chat.completions.create(
+            model=self.dots_ocr_model_name,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{image_b64}"}
+                        }
+                    ]
+                }
+            ],
+            temperature=0.0,
+            max_tokens=8192
+        )
+
+        content = ""
+        if response and response.choices and response.choices[0].message:
+            content = response.choices[0].message.content or ""
+
+        payload: Dict[str, Any] = {}
+        try:
+            loaded = json.loads(content)
+            payload = self._coerce_payload(loaded)
+        except Exception:
+            payload = self._extract_json_from_text(content) or {}
+
+        # vLLM xgrammar 在部分请求会失败导致空响应；若结构化失败，退回纯文本 OCR
+        if not payload and not content.strip():
+            logger.warning("Dots OCR returned empty structured response, retrying with plain-text prompt")
+            try:
+                fallback_prompt = "Perform OCR and return plain text only, in reading order."
+                fallback_resp = self._ocr_engine.chat.completions.create(
+                    model=self.dots_ocr_model_name,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": fallback_prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:image/png;base64,{image_b64}"}
+                                }
+                            ]
+                        }
+                    ],
+                    temperature=0.0,
+                    max_tokens=4096
+                )
+                if fallback_resp and fallback_resp.choices and fallback_resp.choices[0].message:
+                    fallback_text = (fallback_resp.choices[0].message.content or "").strip()
+                    if fallback_text:
+                        payload = {
+                            "full_text": fallback_text,
+                            "text_blocks": [
+                                {
+                                    "text": fallback_text,
+                                    "confidence": 0.8,
+                                    "bbox": [0, 0, int(page_w), int(page_h)],
+                                    "block_type": "text"
+                                }
+                            ],
+                            "tables": [],
+                            "figures": []
+                        }
+            except Exception as fallback_err:
+                logger.warning(f"Dots OCR fallback request failed: {fallback_err}")
+
+        default_bbox = (0, 0, int(page_w), int(page_h))
+
+        text_blocks: List[OCRTextBlock] = []
+        for item in payload.get("text_blocks", []):
+            text = (item.get("text", "") or "").strip()
+            if not text:
+                continue
+            bbox = self._normalize_bbox(item.get("bbox"), page_w, page_h, default_bbox)
+            conf = float(item.get("confidence", 0.85) or 0.85)
+            block_type = item.get("block_type", "text") or "text"
+            text_blocks.append(
+                OCRTextBlock(
+                    text=text,
+                    confidence=conf,
+                    bbox=bbox,
+                    block_type=block_type
+                )
+            )
+
+        tables: List[OCRTable] = []
+        for item in payload.get("tables", []):
+            cells = item.get("cells", []) or []
+            markdown = (item.get("markdown", "") or "").strip()
+            bbox = self._normalize_bbox(item.get("bbox"), page_w, page_h, default_bbox)
+            conf = float(item.get("confidence", 0.8) or 0.8)
+            table = OCRTable(cells=cells, confidence=conf, bbox=bbox, markdown=markdown)
+            if not table.markdown and table.cells:
+                table.to_markdown()
+            tables.append(table)
+
+        detected_regions: List[Tuple[int, int, int, int]] = []
+        if self.dots_ocr_figure_cv_fallback:
+            detected_regions = self._detect_figure_regions_cv(
+                image_path=image_path,
+                page_w=page_w,
+                page_h=page_h,
+                text_blocks=text_blocks,
+                tables=tables,
+            )
+
+        figure_items = payload.get("figures", []) or payload.get("images", []) or payload.get("pictures", [])
+        if not isinstance(figure_items, list):
+            figure_items = []
+
+        figures: List[OCRFigure] = []
+        region_idx = 0
+        for item in figure_items:
+            if not isinstance(item, dict):
+                continue
+            bbox = self._normalize_bbox(item.get("bbox"), page_w, page_h, default_bbox)
+            if bbox == default_bbox and region_idx < len(detected_regions):
+                bbox = detected_regions[region_idx]
+                region_idx += 1
+            figures.append(
+                OCRFigure(
+                    image_path=item.get("image_path", ""),
+                    caption=(item.get("caption", "") or "").strip(),
+                    description=(item.get("description", "") or "").strip(),
+                    bbox=bbox
+                )
+            )
+
+        # 仅在开启兜底时启用图题推断 / CV 区域补偿
+        if not figures and self.dots_ocr_figure_cv_fallback:
+            figures = self._infer_figures_from_text_blocks(text_blocks)
+            if figures and detected_regions:
+                used: set[int] = set()
+                for fig in figures:
+                    match_idx = self._match_region_for_caption(fig.bbox, detected_regions, used)
+                    if match_idx is not None:
+                        fig.bbox = detected_regions[match_idx]
+                        used.add(match_idx)
+            elif detected_regions:
+                figures = [
+                    OCRFigure(
+                        image_path="",
+                        caption="Detected figure region",
+                        description="Detected by CV layout analysis.",
+                        bbox=b,
+                    )
+                    for b in detected_regions
+                ]
+
+        full_text = (payload.get("full_text", "") or "").strip()
+        if not full_text:
+            full_text = "\n".join([b.text for b in text_blocks]).strip()
+
+        # 兜底：至少返回一个文本块，且 bbox 非 0
+        if not text_blocks and full_text:
+            text_blocks.append(
+                OCRTextBlock(
+                    text=full_text,
+                    confidence=0.85,
+                    bbox=default_bbox,
+                    block_type="text"
+                )
+            )
+
+        conf_values = [b.confidence for b in text_blocks] + [t.confidence for t in tables]
+        avg_conf = sum(conf_values) / len(conf_values) if conf_values else (0.85 if full_text else 0.0)
+
+        return OCRPageResult(
+            page_num=page_num,
+            text_blocks=text_blocks,
+            tables=tables,
+            figures=figures,
+            full_text=full_text,
+            confidence=avg_conf
+        )
+
+    def _coerce_payload(self, loaded: Any) -> Dict[str, Any]:
+        """将模型返回统一为 dict 格式，兼容 list/string 结构"""
+        if isinstance(loaded, dict):
+            figures = loaded.get("figures")
+            if not figures:
+                for alias in ("images", "pictures", "illustrations", "charts", "diagrams"):
+                    alias_items = loaded.get(alias)
+                    if isinstance(alias_items, list) and alias_items:
+                        loaded["figures"] = alias_items
+                        break
+            return loaded
+
+        if isinstance(loaded, list):
+            text_parts: List[str] = []
+            text_blocks: List[Dict[str, Any]] = []
+            tables: List[Dict[str, Any]] = []
+            figures: List[Dict[str, Any]] = []
+            for item in loaded:
+                if isinstance(item, dict):
+                    txt = item.get("text") or item.get("content") or ""
+                    if txt:
+                        text_parts.append(str(txt))
+                        text_blocks.append({
+                            "text": str(txt),
+                            "confidence": item.get("confidence", 0.8),
+                            "bbox": item.get("bbox", [0, 0, 0, 0]),
+                            "block_type": item.get("block_type", "text"),
+                        })
+                    if item.get("cells") or item.get("markdown"):
+                        tables.append(item)
+                    if item.get("caption") or item.get("description") or item.get("image_path"):
+                        figures.append(item)
+                elif isinstance(item, str):
+                    text_parts.append(item)
+                    text_blocks.append({
+                        "text": item,
+                        "confidence": 0.8,
+                        "bbox": [0, 0, 0, 0],
+                        "block_type": "text",
+                    })
+            return {
+                "full_text": "\n".join(text_parts).strip(),
+                "text_blocks": text_blocks,
+                "tables": tables,
+                "figures": figures,
+            }
+
+        if isinstance(loaded, str):
+            return {
+                "full_text": loaded,
+                "text_blocks": [{"text": loaded, "confidence": 0.8, "bbox": [0, 0, 0, 0], "block_type": "text"}],
+                "tables": [],
+                "figures": [],
+            }
+
+        return {}
+
+    def _looks_like_figure_caption(self, text: str) -> bool:
+        if not text:
+            return False
+        t = text.strip()
+        if re.match(r"^(图|图表)\s*\d+([\-—\.]\d+)*", t):
+            return True
+        if re.match(r"^figure\s*\d+([\-—\.]\d+)*", t, flags=re.IGNORECASE):
+            return True
+        return False
+
+    def _infer_figures_from_text_blocks(self, text_blocks: List[OCRTextBlock]) -> List[OCRFigure]:
+        figures: List[OCRFigure] = []
+        for block in text_blocks:
+            if self._looks_like_figure_caption(block.text):
+                figures.append(
+                    OCRFigure(
+                        image_path="",
+                        caption=block.text.strip(),
+                        description="Inferred from figure caption text block.",
+                        bbox=block.bbox
+                    )
+                )
+        return figures
+
+    def _match_region_for_caption(
+        self,
+        caption_bbox: Tuple[int, int, int, int],
+        regions: List[Tuple[int, int, int, int]],
+        used: set
+    ) -> Optional[int]:
+        """给图题框匹配最近的图片区域（优先图题上方且有水平重叠）"""
+        cx1, cy1, cx2, cy2 = caption_bbox
+        best_idx = None
+        best_score = float("inf")
+        for i, (rx1, ry1, rx2, ry2) in enumerate(regions):
+            if i in used:
+                continue
+            horizontal_overlap = max(0, min(cx2, rx2) - max(cx1, rx1))
+            min_width = max(1, min(cx2 - cx1, rx2 - rx1))
+            overlap_ratio = horizontal_overlap / min_width
+            if overlap_ratio < 0.15:
+                continue
+
+            # 优先图题上方区域；否则允许下方近邻
+            if ry2 <= cy1:
+                distance = cy1 - ry2
+            else:
+                distance = (ry1 - cy2) + 2000
+
+            if distance < best_score:
+                best_score = distance
+                best_idx = i
+        return best_idx
+
+    def _detect_figure_regions_cv(
+        self,
+        image_path: str,
+        page_w: int,
+        page_h: int,
+        text_blocks: List[OCRTextBlock],
+        tables: List[OCRTable]
+    ) -> List[Tuple[int, int, int, int]]:
+        """基于版面分析检测图片区域，排除文本和表格区域"""
+        if not HAS_CV2:
+            return []
+
+        img = cv2.imread(image_path)
+        if img is None:
+            return []
+
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        # 近似去除文字：先构建文本/表格掩码，避免把文字连通域当成图片
+        exclusion = np.zeros_like(gray)
+        for block in text_blocks:
+            x1, y1, x2, y2 = block.bbox
+            pad = 6
+            x1 = max(0, x1 - pad)
+            y1 = max(0, y1 - pad)
+            x2 = min(page_w, x2 + pad)
+            y2 = min(page_h, y2 + pad)
+            cv2.rectangle(exclusion, (x1, y1), (x2, y2), 255, thickness=-1)
+
+        for table in tables:
+            x1, y1, x2, y2 = table.bbox
+            cv2.rectangle(exclusion, (x1, y1), (x2, y2), 255, thickness=-1)
+
+        # 边缘 + 闭运算获取候选图块
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, 40, 120)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+        merged = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+        # 用 exclusion 去除文本密集区
+        mask = cv2.bitwise_and(merged, cv2.bitwise_not(exclusion))
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        min_area = int(page_w * page_h * 0.01)   # 至少占页面 1%
+        max_area = int(page_w * page_h * 0.75)   # 最大不超过 75%
+
+        regions: List[Tuple[int, int, int, int]] = []
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            area = w * h
+            if area < min_area or area > max_area:
+                continue
+            if w < 80 or h < 80:
+                continue
+
+            # 图片区域通常不是超细长条，放宽但过滤极端噪声
+            ratio = w / max(h, 1)
+            if ratio < 0.15 or ratio > 6.5:
+                continue
+
+            # 候选区域内若仍为高文字密度，过滤掉
+            roi_excl = exclusion[y:y + h, x:x + w]
+            text_cover = float(np.count_nonzero(roi_excl)) / float(max(1, roi_excl.size))
+            if text_cover > 0.45:
+                continue
+
+            regions.append((x, y, x + w, y + h))
+
+        # 去重：按面积降序保留，去掉高度重叠候选
+        regions = sorted(regions, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]), reverse=True)
+        deduped: List[Tuple[int, int, int, int]] = []
+        for box in regions:
+            if any(self._bbox_iou(box, keep) > 0.6 for keep in deduped):
+                continue
+            deduped.append(box)
+
+        # 阅读顺序输出
+        deduped.sort(key=lambda b: (b[1], b[0]))
+        return deduped[:8]
+
+    def _bbox_iou(
+        self,
+        a: Tuple[int, int, int, int],
+        b: Tuple[int, int, int, int]
+    ) -> float:
+        ax1, ay1, ax2, ay2 = a
+        bx1, by1, bx2, by2 = b
+        inter_w = max(0, min(ax2, bx2) - max(ax1, bx1))
+        inter_h = max(0, min(ay2, by2) - max(ay1, by1))
+        inter = inter_w * inter_h
+        if inter <= 0:
+            return 0.0
+        area_a = max(1, (ax2 - ax1) * (ay2 - ay1))
+        area_b = max(1, (bx2 - bx1) * (by2 - by1))
+        return inter / float(area_a + area_b - inter)
+
+    def _extract_json_from_text(self, text: str) -> Optional[Dict[str, Any]]:
+        """从混合文本中提取 JSON 对象"""
+        if not text:
+            return None
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+        try:
+            loaded = json.loads(text[start:end + 1])
+            return self._coerce_payload(loaded)
+        except Exception:
+            return None
+
+    def _normalize_bbox(
+        self,
+        bbox_raw: Any,
+        page_w: int,
+        page_h: int,
+        default_bbox: Tuple[int, int, int, int]
+    ) -> Tuple[int, int, int, int]:
+        """规范化 bbox，确保落在页面范围内且非零"""
+        try:
+            if not isinstance(bbox_raw, (list, tuple)) or len(bbox_raw) != 4:
+                return default_bbox
+            x1, y1, x2, y2 = [int(float(v)) for v in bbox_raw]
+            x1 = max(0, min(x1, page_w))
+            x2 = max(0, min(x2, page_w))
+            y1 = max(0, min(y1, page_h))
+            y2 = max(0, min(y2, page_h))
+            if x2 <= x1 or y2 <= y1:
+                return default_bbox
+            return (x1, y1, x2, y2)
+        except Exception:
+            return default_bbox
     
     def _process_with_paddleocr(self, pdf_path: str, is_scanned: bool) -> OCRDocumentResult:
         """使用 PaddleOCR 处理"""

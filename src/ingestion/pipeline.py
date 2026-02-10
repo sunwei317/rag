@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 from loguru import logger
 from dataclasses import dataclass
+import os
 
 from .pdf_parser import PDFParser, ParsedDocument
 from .chunker import SmartChunker, ChunkingResult, Chunk
@@ -47,10 +48,16 @@ class IngestionPipeline:
         save_intermediate: bool = True
     ):
         # 解析器
+        ocr_provider = os.getenv("OCR_PROVIDER", "dots_ocr")
+        force_ocr_all = os.getenv("OCR_FORCE_ALL_PDF", "true").lower() in ("1", "true", "yes", "on")
         self.parser = PDFParser(
             extract_images=True,
-            extract_tables=True
+            extract_tables=True,
+            enable_ocr=True,
+            ocr_provider=ocr_provider
         )
+        self.force_ocr_all = force_ocr_all
+        logger.info(f"Ingestion OCR config: provider={ocr_provider}, force_all_pdf={self.force_ocr_all}")
         
         # 切分器
         self.chunker = SmartChunker(
@@ -101,7 +108,7 @@ class IngestionPipeline:
         
         # 1. 解析 PDF
         logger.info("Step 1: 解析 PDF...")
-        parsed_doc = self.parser.parse(pdf_path, metadata)
+        parsed_doc = self.parser.parse(pdf_path, metadata, force_ocr=self.force_ocr_all)
         
         if self.save_intermediate:
             self._save_parsed_doc(parsed_doc)

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 from loguru import logger
 import httpx
+import os
 
 from .chunker import Chunk, ChunkingResult
 
@@ -131,41 +132,96 @@ class Embedder:
     def _embed_local_api(self, texts: List[str]) -> List[np.ndarray]:
         """使用本地 HTTP API 进行向量化"""
         embeddings = []
-        
-        for i in range(0, len(texts), self.batch_size):
-            batch = texts[i:i + self.batch_size]
-            
-            try:
-                response = self._http_client.post(
-                    self.local_api_url,
-                    json={"inputs": batch}
+
+        # OCR 文本会很长，按“字符预算”分批可显著降低 413 发生概率
+        max_chars_per_request = int(os.getenv("EMBEDDING_MAX_CHARS_PER_REQUEST", "6000"))
+        max_chars_per_item = int(os.getenv("EMBEDDING_MAX_CHARS_PER_ITEM", "2000"))
+        current_batch: List[str] = []
+        current_chars = 0
+
+        for text in texts:
+            text = (text or "").strip()
+            # 单条过长会触发 413，先截断用于 embedding（不影响原始 chunk 内容）
+            if len(text) > max_chars_per_item:
+                logger.warning(
+                    f"Truncating oversized text for embedding: {len(text)} -> {max_chars_per_item} chars"
                 )
-                response.raise_for_status()
-                
-                # 解析响应 - 假设返回格式为 [[...], [...], ...]
-                result = response.json()
-                
-                # 处理不同的响应格式
-                if isinstance(result, list):
-                    for emb in result:
-                        if isinstance(emb, list):
-                            embeddings.append(np.array(emb, dtype=np.float32))
-                        elif isinstance(emb, dict) and "embedding" in emb:
-                            embeddings.append(np.array(emb["embedding"], dtype=np.float32))
-                elif isinstance(result, dict):
-                    # 可能是 {"embeddings": [[...], [...]]} 格式
-                    emb_list = result.get("embeddings", result.get("data", []))
-                    for emb in emb_list:
-                        if isinstance(emb, list):
-                            embeddings.append(np.array(emb, dtype=np.float32))
-                        elif isinstance(emb, dict) and "embedding" in emb:
-                            embeddings.append(np.array(emb["embedding"], dtype=np.float32))
-                            
-            except Exception as e:
-                logger.error(f"Local API embedding failed: {e}")
-                raise
+                text = text[:max_chars_per_item]
+            text_len = len(text)
+            if current_batch and (
+                len(current_batch) >= self.batch_size
+                or current_chars + text_len > max_chars_per_request
+            ):
+                embeddings.extend(self._embed_local_api_batch(current_batch))
+                current_batch = []
+                current_chars = 0
+
+            current_batch.append(text)
+            current_chars += text_len
+
+        if current_batch:
+            embeddings.extend(self._embed_local_api_batch(current_batch))
         
         return embeddings
+
+    def _embed_local_api_batch(self, batch: List[str]) -> List[np.ndarray]:
+        """单批请求本地 embedding API，遇到 413 时自动拆分重试"""
+        try:
+            response = self._http_client.post(
+                self.local_api_url,
+                json={"inputs": batch}
+            )
+            response.raise_for_status()
+
+            result = response.json()
+            parsed = self._parse_embeddings_result(result)
+            if len(parsed) != len(batch):
+                raise ValueError(
+                    f"Embedding count mismatch: got {len(parsed)}, expected {len(batch)}"
+                )
+            return parsed
+        except httpx.HTTPStatusError as e:
+            if e.response is not None and e.response.status_code == 413 and len(batch) > 1:
+                mid = len(batch) // 2
+                logger.warning(
+                    f"Embedding payload too large (413), splitting batch {len(batch)} -> {mid}+{len(batch)-mid}"
+                )
+                return self._embed_local_api_batch(batch[:mid]) + self._embed_local_api_batch(batch[mid:])
+            if e.response is not None and e.response.status_code == 413 and len(batch) == 1:
+                # 兜底：单条文本仍过大时再截断重试一次
+                fallback_single_chars = int(os.getenv("EMBEDDING_FALLBACK_SINGLE_CHARS", "1000"))
+                shortened = batch[0][:fallback_single_chars]
+                logger.warning(
+                    f"Single embedding item still too large (413), retrying with {fallback_single_chars}-char truncation"
+                )
+                response = self._http_client.post(self.local_api_url, json={"inputs": [shortened]})
+                response.raise_for_status()
+                parsed = self._parse_embeddings_result(response.json())
+                if not parsed:
+                    raise ValueError("Embedding API returned empty embedding for truncated item")
+                return parsed
+            logger.error(f"Local API embedding failed: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Local API embedding failed: {e}")
+            raise
+
+    def _parse_embeddings_result(self, result: Union[List, dict]) -> List[np.ndarray]:
+        parsed: List[np.ndarray] = []
+        if isinstance(result, list):
+            for emb in result:
+                if isinstance(emb, list):
+                    parsed.append(np.array(emb, dtype=np.float32))
+                elif isinstance(emb, dict) and "embedding" in emb:
+                    parsed.append(np.array(emb["embedding"], dtype=np.float32))
+        elif isinstance(result, dict):
+            emb_list = result.get("embeddings", result.get("data", []))
+            for emb in emb_list:
+                if isinstance(emb, list):
+                    parsed.append(np.array(emb, dtype=np.float32))
+                elif isinstance(emb, dict) and "embedding" in emb:
+                    parsed.append(np.array(emb["embedding"], dtype=np.float32))
+        return parsed
     
     def embed_chunks(self, chunks: List[Chunk]) -> List[EmbeddingResult]:
         """对 Chunk 列表进行向量化"""
