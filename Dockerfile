@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim as app
 
 WORKDIR /app
 
@@ -6,6 +6,12 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
+    # OpenCV/PaddleOCR runtime deps
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
     # WeasyPrint 依赖
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
@@ -44,6 +50,12 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
+    # OpenCV/PaddleOCR runtime deps
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
     # WeasyPrint dependencies
     libpango-1.0-0 \
     libpangocairo-1.0-0 \

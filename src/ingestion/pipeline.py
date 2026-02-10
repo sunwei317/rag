@@ -48,7 +48,7 @@ class IngestionPipeline:
         save_intermediate: bool = True
     ):
         # 解析器
-        ocr_provider = os.getenv("OCR_PROVIDER", "dots_ocr")
+        ocr_provider = os.getenv("OCR_PROVIDER", "paddleocr")
         force_ocr_all = os.getenv("OCR_FORCE_ALL_PDF", "true").lower() in ("1", "true", "yes", "on")
         self.parser = PDFParser(
             extract_images=True,

@@ -759,6 +759,80 @@ Rules:
                 )
         return figures
 
+    def _assign_figure_captions_from_text_blocks(
+        self,
+        figures: List[OCRFigure],
+        text_blocks: List[OCRTextBlock]
+    ) -> None:
+        """为图片区域匹配邻近图注文本。"""
+        sorted_blocks = sorted(text_blocks, key=lambda b: (b.bbox[1], b.bbox[0]))
+        for fig in figures:
+            if fig.caption and len(fig.caption.strip()) >= 2:
+                continue
+            caption = self._find_caption_near_figure(fig.bbox, sorted_blocks)
+            if caption:
+                fig.caption = caption
+            elif not fig.caption:
+                fig.caption = "Detected figure"
+
+    def _find_caption_near_figure(
+        self,
+        fig_bbox: Tuple[int, int, int, int],
+        text_blocks: List[OCRTextBlock]
+    ) -> str:
+        """在图片框附近搜索图注，优先下方近邻与图题模式。"""
+        fx1, fy1, fx2, fy2 = fig_bbox
+        fig_w = max(1, fx2 - fx1)
+        fig_h = max(1, fy2 - fy1)
+        max_v_gap = max(220, int(0.35 * fig_h))
+        max_h_pad = max(160, int(0.35 * fig_w))
+
+        best_text = ""
+        best_score = float("inf")
+
+        for i, block in enumerate(text_blocks):
+            tx1, ty1, tx2, ty2 = block.bbox
+            horizontal_overlap = max(0, min(fx2, tx2) - max(fx1, tx1))
+            horizontal_near = tx1 <= fx2 + max_h_pad and tx2 >= fx1 - max_h_pad
+            if horizontal_overlap <= 0 and not horizontal_near:
+                continue
+
+            if ty1 >= fy2:
+                v_gap = ty1 - fy2
+                if v_gap > max_v_gap:
+                    continue
+                direction_penalty = 0
+            elif ty2 <= fy1:
+                v_gap = fy1 - ty2
+                if v_gap > max_v_gap:
+                    continue
+                direction_penalty = 80
+            else:
+                continue
+
+            text = (block.text or "").strip()
+            if not text:
+                continue
+
+            pattern_bonus = -60 if self._looks_like_figure_caption(text) else 0
+            candidate = text
+            if self._looks_like_figure_caption(text) and i + 1 < len(text_blocks):
+                next_block = text_blocks[i + 1]
+                next_text = (next_block.text or "").strip()
+                nx1, ny1, nx2, ny2 = next_block.bbox
+                same_column = nx1 <= tx2 + 100 and nx2 >= tx1 - 100
+                next_is_near = 0 <= (ny1 - ty2) <= 80
+                next_is_not_caption = next_text and (not self._looks_like_figure_caption(next_text))
+                if same_column and next_is_near and next_is_not_caption:
+                    candidate = f"{text} {next_text}"
+
+            score = v_gap + direction_penalty + pattern_bonus
+            if score < best_score:
+                best_score = score
+                best_text = candidate
+
+        return best_text
+
     def _match_region_for_caption(
         self,
         caption_bbox: Tuple[int, int, int, int],
@@ -975,7 +1049,8 @@ Rules:
                 result = self._layout_engine(image_path)
                 
                 for item in result:
-                    item_type = item.get("type", "text")
+                    item_type_raw = item.get("type", "text")
+                    item_type = str(item_type_raw).strip().lower()
                     bbox = item.get("bbox", [0, 0, 0, 0])
                     bbox_tuple = (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))
                     
@@ -994,11 +1069,11 @@ Rules:
                         tables.append(table)
                         full_text_parts.append(f"\n[表格]\n{table.markdown}\n")
                     
-                    elif item_type == "figure":
+                    elif item_type in ("figure", "image", "picture", "pic", "chart", "diagram", "formula"):
                         # 图片
                         figure = OCRFigure(
                             image_path="",
-                            caption="",
+                            caption=item.get("label", "") or "",
                             bbox=bbox_tuple
                         )
                         figures.append(figure)
@@ -1033,6 +1108,9 @@ Rules:
                 self._basic_ocr_paddleocr(image_path, text_blocks, full_text_parts, confidences)
         else:
             self._basic_ocr_paddleocr(image_path, text_blocks, full_text_parts, confidences)
+
+        if figures and text_blocks:
+            self._assign_figure_captions_from_text_blocks(figures, text_blocks)
         
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
         
